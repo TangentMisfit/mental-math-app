@@ -1,0 +1,1209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Mental Math</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --surface-2: #eceef2;
+    --text: #14181f;
+    --text-dim: #5b6472;
+    --border: #dde1e7;
+    --accent: #2563eb;
+    --accent-text: #ffffff;
+    --good: #16a34a;
+    --bad: #dc2626;
+    --warn: #d97706;
+    --lock: #9aa3b2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115;
+      --surface: #181c23;
+      --surface-2: #20252d;
+      --text: #e7eaf0;
+      --text-dim: #9aa3b2;
+      --border: #2b3038;
+      --accent: #3b82f6;
+      --accent-text: #071021;
+      --good: #4ade80;
+      --bad: #f87171;
+      --warn: #fbbf24;
+      --lock: #6b7280;
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    height: 100%; overscroll-behavior-y: contain; user-select: none;
+  }
+  #app { display: flex; flex-direction: column; min-height: 100vh; max-width: 560px; margin: 0 auto; }
+  header.top {
+    padding: 14px 16px 10px; display: flex; align-items: center; justify-content: space-between;
+  }
+  header.top h1 { font-size: 18px; margin: 0; font-weight: 700; letter-spacing: 0.2px; }
+  header.top .nav-btn {
+    background: none; border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 6px 10px; font-size: 13px;
+  }
+  main { flex: 1; padding: 0 16px 24px; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    padding: 14px 16px; margin-bottom: 12px;
+  }
+  .card h2 { margin: 0 0 8px; font-size: 16px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .muted { color: var(--text-dim); font-size: 12.5px; }
+  .badge {
+    display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  .badge.calibrating { background: var(--surface-2); color: var(--text-dim); }
+  .badge.drill { background: rgba(220,38,38,0.15); color: var(--bad); }
+  .badge.advance { background: rgba(22,163,74,0.15); color: var(--good); }
+  .badge.hold { background: rgba(217,119,6,0.15); color: var(--warn); }
+  .badge.locked { background: var(--surface-2); color: var(--lock); }
+  .badge.complete { background: var(--surface-2); color: var(--text-dim); }
+  .badge.soon { background: var(--surface-2); color: var(--text-dim); }
+
+  .stats-line { display: flex; gap: 14px; margin: 8px 0; flex-wrap: wrap; }
+  .stat { font-size: 13px; }
+  .stat b { display: block; font-size: 15px; }
+  .tags-line { margin: 6px 0 10px; font-size: 12.5px; color: var(--text-dim); }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  button.action {
+    flex: 1; min-width: 100px; padding: 10px 12px; border-radius: 10px; border: none;
+    background: var(--accent); color: var(--accent-text); font-size: 14px; font-weight: 600;
+  }
+  button.action.secondary {
+    background: var(--surface-2); color: var(--text);
+  }
+  button.action.warn { background: var(--bad); color: #fff; }
+  button.action:disabled { opacity: 0.45; }
+  button.link {
+    background: none; border: none; color: var(--accent); font-size: 13px; padding: 4px 0;
+  }
+
+  #plan-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+  .plan-item {
+    display: flex; justify-content: space-between; align-items: center;
+    background: var(--surface-2); border-radius: 10px; padding: 8px 12px; font-size: 13.5px;
+  }
+
+  /* Round view */
+  .timer-wrap { margin: 6px 0 18px; }
+  .timer-bar-bg { background: var(--surface-2); height: 8px; border-radius: 999px; overflow: hidden; }
+  .timer-bar-fg { background: var(--accent); height: 100%; width: 100%; transition: width 0.2s linear; }
+  .timer-num { text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--text-dim); margin-top: 4px; }
+
+  .question-box { text-align: center; padding: 30px 10px 18px; }
+  .question-text { font-size: 34px; font-weight: 700; letter-spacing: 0.5px; }
+  .answer-display {
+    min-height: 44px; font-size: 28px; text-align: center; margin: 6px 0 18px;
+    border-bottom: 2px solid var(--border); padding-bottom: 6px; font-variant-numeric: tabular-nums;
+  }
+  .feedback { text-align: center; font-size: 15px; min-height: 22px; margin-bottom: 6px; font-weight: 600; }
+  .feedback.correct { color: var(--good); }
+  .feedback.incorrect { color: var(--bad); }
+
+  .keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .keypad button {
+    padding: 18px 0; font-size: 22px; border-radius: 12px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); font-weight: 600;
+  }
+  .keypad button:active { background: var(--surface-2); }
+  .keypad button.wide { grid-column: span 1; }
+  .round-controls { display: flex; gap: 10px; margin-top: 12px; }
+  .round-controls button { flex: 1; }
+
+  table.log-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.log-table th, table.log-table td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+  table.log-table th { color: var(--text-dim); font-weight: 600; }
+  .legacy-tag { font-size: 10.5px; color: var(--text-dim); }
+
+  .miss-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .slowest-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+
+  #toast {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px;
+    font-size: 13px; opacity: 0; pointer-events: none; transition: opacity 0.25s;
+    max-width: 85%; text-align: center; z-index: 50;
+  }
+  #toast.show { opacity: 0.95; }
+
+  input[type="file"] { display: none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <h1>Mental Math</h1>
+    <div class="btn-row">
+      <button class="nav-btn" data-nav="home">Home</button>
+      <button class="nav-btn" data-nav="history">History</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="view-home" class="view active">
+      <div id="plan-card" class="card" style="display:none;">
+        <h2>Today's plan</h2>
+        <div id="plan-list"></div>
+      </div>
+      <div class="btn-row" style="margin-bottom:12px;">
+        <button class="action" id="btn-build-plan">Build today's plan</button>
+      </div>
+
+      <div id="mode-cards"></div>
+
+      <div class="card">
+        <h2>Coming soon</h2>
+        <div id="soon-cards"></div>
+      </div>
+
+      <div class="card">
+        <h2>Import / Export</h2>
+        <div class="btn-row">
+          <button class="action secondary" id="btn-import">Import CSV</button>
+          <button class="action secondary" id="btn-export">Export CSV</button>
+        </div>
+        <input type="file" id="file-import" accept=".csv,text/csv">
+      </div>
+    </section>
+
+    <section id="view-round" class="view">
+      <div class="timer-wrap">
+        <div class="timer-bar-bg"><div class="timer-bar-fg" id="timer-bar"></div></div>
+        <div class="timer-num" id="timer-num">300s</div>
+      </div>
+      <div class="question-box">
+        <div class="muted" id="round-label">add · intermediate</div>
+        <div class="question-text" id="question-text">? + ? = ?</div>
+      </div>
+      <div class="answer-display" id="answer-display">&nbsp;</div>
+      <div class="feedback" id="feedback"></div>
+      <div class="keypad" id="keypad"></div>
+      <div class="round-controls">
+        <button class="action secondary" id="btn-skip">Skip</button>
+        <button class="action" id="btn-submit">Submit</button>
+      </div>
+    </section>
+
+    <section id="view-summary" class="view">
+      <div class="card">
+        <h2>Round summary</h2>
+        <div class="stats-line">
+          <div class="stat">Asked<b id="sum-asked">0</b></div>
+          <div class="stat">Correct<b id="sum-correct">0</b></div>
+          <div class="stat">Accuracy<b id="sum-accuracy">0%</b></div>
+          <div class="stat">Avg time<b id="sum-avg">0ms</b></div>
+        </div>
+        <div class="row">
+          <div class="muted">Gate before: <span id="sum-gate-before">-</span></div>
+        </div>
+        <div class="row">
+          <div class="muted">Gate after: <span id="sum-gate-after">-</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Misses</h2>
+        <div id="sum-misses"><div class="muted">None</div></div>
+      </div>
+      <div class="card">
+        <h2>3 slowest correct</h2>
+        <div id="sum-slowest"><div class="muted">None</div></div>
+      </div>
+      <button class="action" id="btn-summary-home">Back to home</button>
+    </section>
+
+    <section id="view-history" class="view">
+      <div class="card">
+        <h2>Round history</h2>
+        <div style="overflow-x:auto;">
+          <table class="log-table" id="history-table">
+            <thead>
+              <tr><th>When</th><th>Mode</th><th>Diff</th><th>Asked</th><th>Acc</th><th>Avg</th><th>Flags</th></tr>
+            </thead>
+            <tbody id="history-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+<div id="toast"></div>
+
+<script>
+/* ============================================================
+   SETTINGS — every tunable value lives here
+   ============================================================ */
+var SETTINGS = {
+  roundSeconds: 300,
+  modes: ["add", "sub", "mul", "div"],
+  comingSoonModes: ["pct", "scale", "mixed", "ratios"],
+  difficulties: ["beginner", "intermediate", "advanced"],
+
+  ranges: {
+    add: { beginner: [0, 20], intermediate: [0, 100], advanced: [100, 999] },
+    sub: { beginner: [0, 20], intermediate: [0, 100], advanced: [100, 999] },
+    mul: {
+      beginner: { a: [1, 12], b: [1, 12] },
+      intermediate: { a: [10, 99], b: [2, 9] },
+      advanced: { a: [10, 99], b: [10, 99] }
+    },
+    div: {
+      beginner: { divisor: [2, 12], quotient: [2, 12] },
+      intermediate: { divisor: [3, 12], quotient: [13, 40] },
+      advanced: { divisor: [2, 19], quotient: [5, 99] }
+    }
+  },
+
+  speedTargetMs: {
+    add: { beginner: 3000, intermediate: 4500, advanced: 7000 },
+    sub: { beginner: 3000, intermediate: 4500, advanced: 7000 },
+    mul: { beginner: 3000, intermediate: 5000, advanced: 15000 },
+    div: { beginner: 3000, intermediate: 5000, advanced: 7000 }
+  },
+
+  gate: {
+    windowSize: 3,
+    minAnswered: 10,
+    drillAccuracyPct: 85,
+    advanceAccuracyPct: 95,
+    tagMinAttempts: 3,
+    tagMissRatePct: 15,
+    tagLatencyMultiplier: 1.5
+  },
+
+  weakSpot: {
+    regenFraction: 0.6,
+    maxAttemptsPerQuestion: 50,
+    weakTagCount: 2
+  },
+
+  uniqueQuestionMaxAttempts: 200,
+
+  feedbackDelayMs: 1100,
+
+  storageKeys: {
+    rounds: "mm_rounds",
+    questions: "mm_questions",
+    unlocked: "mm_unlocked"
+  },
+
+  modeLabels: { add: "Addition", sub: "Subtraction", mul: "Multiplication", div: "Division" },
+  soonLabels: { pct: "Percentages", scale: "Scale", mixed: "Mixed", ratios: "Ratios" }
+};
+
+/* ============================================================
+   STORAGE
+   ============================================================ */
+function readJSON(key, fallback) {
+  try {
+    var raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    var parsed = JSON.parse(raw);
+    return parsed == null ? fallback : parsed;
+  } catch (e) {
+    return fallback;
+  }
+}
+function writeJSON(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
+}
+function getRounds() { return readJSON(SETTINGS.storageKeys.rounds, []); }
+function saveRounds(rounds) { writeJSON(SETTINGS.storageKeys.rounds, rounds); }
+function getQuestions() { return readJSON(SETTINGS.storageKeys.questions, []); }
+function saveQuestions(questions) { writeJSON(SETTINGS.storageKeys.questions, questions); }
+function getUnlocked() { return readJSON(SETTINGS.storageKeys.unlocked, {}); }
+function saveUnlocked(u) { writeJSON(SETTINGS.storageKeys.unlocked, u); }
+
+function addRound(round) {
+  var rounds = getRounds();
+  rounds.push(round);
+  saveRounds(rounds);
+}
+function addQuestions(list) {
+  var questions = getQuestions();
+  for (var i = 0; i < list.length; i++) questions.push(list[i]);
+  saveQuestions(questions);
+}
+
+/* ============================================================
+   RANDOM HELPERS
+   ============================================================ */
+function randInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+/* ============================================================
+   TAG COMPUTATION
+   ============================================================ */
+function digitsLE(n) {
+  return String(Math.abs(Math.round(n))).split("").reverse().map(Number);
+}
+
+function carryLevelTag(prefix, count) {
+  if (count <= 0) return prefix + ":0";
+  if (count === 1) return prefix + ":1";
+  return prefix + ":2+";
+}
+
+function countAddCarries(a, b) {
+  var da = digitsLE(a), db = digitsLE(b);
+  var len = Math.max(da.length, db.length);
+  var carry = 0, count = 0;
+  for (var i = 0; i < len; i++) {
+    var sum = (da[i] || 0) + (db[i] || 0) + carry;
+    carry = sum >= 10 ? 1 : 0;
+    if (carry) count++;
+  }
+  return count;
+}
+
+function countSubBorrows(a, b) {
+  // assumes a >= b
+  var da = digitsLE(a), db = digitsLE(b);
+  var borrow = 0, count = 0;
+  for (var i = 0; i < da.length; i++) {
+    var top = da[i] - borrow;
+    var bot = db[i] || 0;
+    if (top < bot) { borrow = 1; count++; } else { borrow = 0; }
+  }
+  return count;
+}
+
+function countMulCarries(a, b) {
+  var da = digitsLE(a), db = digitsLE(b);
+  var count = 0;
+  var partials = [];
+  for (var j = 0; j < db.length; j++) {
+    var carry = 0;
+    var out = [];
+    for (var i = 0; i < da.length; i++) {
+      var prod = da[i] * db[j] + carry;
+      out.push(prod % 10);
+      carry = Math.floor(prod / 10);
+      if (carry > 0) count++;
+    }
+    while (carry > 0) { out.push(carry % 10); carry = Math.floor(carry / 10); }
+    partials.push({ digits: out, shift: j });
+  }
+  var maxLen = 0;
+  for (var p = 0; p < partials.length; p++) {
+    maxLen = Math.max(maxLen, partials[p].digits.length + partials[p].shift);
+  }
+  var addCarry = 0;
+  for (var pos = 0; pos < maxLen; pos++) {
+    var sum = addCarry;
+    for (var k = 0; k < partials.length; k++) {
+      var idx = pos - partials[k].shift;
+      if (idx >= 0 && idx < partials[k].digits.length) sum += partials[k].digits[idx];
+    }
+    addCarry = Math.floor(sum / 10);
+    if (addCarry > 0) count++;
+  }
+  return count;
+}
+
+function tagsForAdd(a, b) {
+  return [carryLevelTag("carry", countAddCarries(a, b))];
+}
+function tagsForSub(a, b) {
+  return [carryLevelTag("borrow", countSubBorrows(a, b))];
+}
+function tagsForMul(a, b) {
+  var tags = [];
+  var single = a < 10 ? a : (b < 10 ? b : null);
+  if (single !== null) tags.push("x" + single);
+  tags.push(carryLevelTag("carry", countMulCarries(a, b)));
+  return tags;
+}
+function tagsForDiv(divisor) {
+  return ["div" + divisor];
+}
+
+/* ============================================================
+   GENERATORS
+   ============================================================ */
+function genAdd(difficulty) {
+  var r = SETTINGS.ranges.add[difficulty];
+  var a = randInt(r[0], r[1]);
+  var b = randInt(r[0], r[1]);
+  return { question: a + " + " + b, answer: a + b, tags: tagsForAdd(a, b) };
+}
+
+function genSub(difficulty) {
+  var r = SETTINGS.ranges.sub[difficulty];
+  var a = randInt(r[0], r[1]);
+  var b = randInt(r[0], r[1]);
+  if (b > a) { var t = a; a = b; b = t; }
+  return { question: a + " - " + b, answer: a - b, tags: tagsForSub(a, b) };
+}
+
+function genMul(difficulty) {
+  var r = SETTINGS.ranges.mul[difficulty];
+  var a = randInt(r.a[0], r.a[1]);
+  var b = randInt(r.b[0], r.b[1]);
+  return { question: a + " × " + b, answer: a * b, tags: tagsForMul(a, b) };
+}
+
+function genDiv(difficulty) {
+  var r = SETTINGS.ranges.div[difficulty];
+  var divisor = randInt(r.divisor[0], r.divisor[1]);
+  var quotient = randInt(r.quotient[0], r.quotient[1]);
+  var dividend = divisor * quotient;
+  return { question: dividend + " ÷ " + divisor, answer: quotient, tags: tagsForDiv(divisor) };
+}
+
+var GENERATORS = { add: genAdd, sub: genSub, mul: genMul, div: genDiv };
+
+function generate(mode, difficulty) {
+  return GENERATORS[mode](difficulty);
+}
+
+function generateUnique(mode, difficulty, seenSet, matchTags) {
+  var maxAttempts = matchTags ? SETTINGS.weakSpot.maxAttemptsPerQuestion : SETTINGS.uniqueQuestionMaxAttempts;
+  var fallback = null;
+  for (var i = 0; i < maxAttempts; i++) {
+    var cand = generate(mode, difficulty);
+    if (seenSet.has(cand.question)) continue;
+    if (matchTags && matchTags.length) {
+      var hit = false;
+      for (var k = 0; k < cand.tags.length; k++) {
+        if (matchTags.indexOf(cand.tags[k]) !== -1) { hit = true; break; }
+      }
+      if (!hit) { if (!fallback) fallback = cand; continue; }
+    }
+    return cand;
+  }
+  if (fallback) return fallback;
+  // last resort: allow a repeat rather than looping forever
+  return generate(mode, difficulty);
+}
+
+/* ============================================================
+   TAG STATS / GATES
+   ============================================================ */
+function getQualifyingRounds(rounds, mode, difficulty) {
+  return rounds
+    .filter(function (r) {
+      return r.mode === mode && r.difficulty === difficulty &&
+        !r.drill && !r.legacy && r.asked >= SETTINGS.gate.minAnswered;
+    })
+    .sort(function (a, b) { return new Date(b.timestamp) - new Date(a.timestamp); })
+    .slice(0, SETTINGS.gate.windowSize);
+}
+
+function computeTagStats(questions) {
+  var map = {};
+  for (var i = 0; i < questions.length; i++) {
+    var q = questions[i];
+    if (q.skipped) continue;
+    var tags = q.tags || [];
+    for (var t = 0; t < tags.length; t++) {
+      var tag = tags[t];
+      if (!map[tag]) map[tag] = { attempts: 0, misses: 0, totalLatency: 0 };
+      map[tag].attempts++;
+      if (!q.correct) map[tag].misses++;
+      map[tag].totalLatency += (q.latency_ms || 0);
+    }
+  }
+  var out = [];
+  for (var tag in map) {
+    var s = map[tag];
+    out.push({
+      tag: tag,
+      attempts: s.attempts,
+      misses: s.misses,
+      missRate: s.misses / s.attempts,
+      avgLatency: s.totalLatency / s.attempts
+    });
+  }
+  return out;
+}
+
+function weakestTags(tagStats, n) {
+  return tagStats
+    .filter(function (t) { return t.attempts >= SETTINGS.gate.tagMinAttempts; })
+    .sort(function (a, b) {
+      if (b.missRate !== a.missRate) return b.missRate - a.missRate;
+      return b.avgLatency - a.avgLatency;
+    })
+    .slice(0, n);
+}
+
+function computeGate(mode, difficulty, roundsOverride, questionsOverride) {
+  var rounds = roundsOverride || getRounds();
+  var allQuestions = questionsOverride || getQuestions();
+  var windowRounds = getQualifyingRounds(rounds, mode, difficulty);
+  var roundIds = {};
+  for (var i = 0; i < windowRounds.length; i++) roundIds[windowRounds[i].round_id] = true;
+  var windowQuestions = allQuestions.filter(function (q) { return roundIds[q.round_id]; });
+  var tagStats = computeTagStats(windowQuestions);
+
+  if (windowRounds.length < SETTINGS.gate.windowSize) {
+    return {
+      status: "Calibrating",
+      label: "Calibrating (" + windowRounds.length + "/" + SETTINGS.gate.windowSize + ")",
+      window: windowRounds,
+      tagStats: tagStats
+    };
+  }
+
+  var speedTarget = SETTINGS.speedTargetMs[mode][difficulty];
+
+  var anyBelowDrill = windowRounds.some(function (r) { return r.accuracy < SETTINGS.gate.drillAccuracyPct; });
+  var badTag = tagStats.some(function (t) {
+    if (t.attempts < SETTINGS.gate.tagMinAttempts) return false;
+    return (t.missRate * 100) >= SETTINGS.gate.tagMissRatePct ||
+      t.avgLatency >= SETTINGS.gate.tagLatencyMultiplier * speedTarget;
+  });
+  if (anyBelowDrill || badTag) {
+    return { status: "Drill", label: "Drill", window: windowRounds, tagStats: tagStats };
+  }
+
+  var all95 = windowRounds.every(function (r) { return r.accuracy >= SETTINGS.gate.advanceAccuracyPct; });
+  var totalAsked = windowRounds.reduce(function (s, r) { return s + r.asked; }, 0);
+  var combinedAvg = totalAsked > 0
+    ? windowRounds.reduce(function (s, r) { return s + r.avg_time_ms * r.asked; }, 0) / totalAsked
+    : 0;
+  if (all95 && combinedAvg <= speedTarget) {
+    return { status: "Advance", label: "Advance", window: windowRounds, tagStats: tagStats };
+  }
+
+  return { status: "Hold", label: "Hold", window: windowRounds, tagStats: tagStats };
+}
+
+function refreshUnlocks(rounds, questions) {
+  var unlocked = getUnlocked();
+  var changed = false;
+  for (var i = 0; i < SETTINGS.modes.length; i++) {
+    var mode = SETTINGS.modes[i];
+    if (unlocked[mode]) continue;
+    var gate = computeGate(mode, "intermediate", rounds, questions);
+    if (gate.status === "Advance") { unlocked[mode] = true; changed = true; }
+  }
+  if (changed) saveUnlocked(unlocked);
+  return unlocked;
+}
+
+function currentLevel(mode, unlocked) {
+  return (unlocked && unlocked[mode]) ? "advanced" : "intermediate";
+}
+
+/* ============================================================
+   CSV IMPORT / EXPORT
+   ============================================================ */
+function csvEscape(val) {
+  var s = String(val == null ? "" : val);
+  if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+function roundsToCSV(rounds) {
+  var header = ["timestamp", "mode", "difficulty", "round_seconds", "asked", "correct", "accuracy", "avg_time_ms", "round_id", "drill", "legacy", "stage"];
+  var lines = [header.join(",")];
+  for (var i = 0; i < rounds.length; i++) {
+    var r = rounds[i];
+    lines.push(header.map(function (k) { return csvEscape(r[k]); }).join(","));
+  }
+  return lines.join("\n");
+}
+
+function questionsToCSV(questions) {
+  var header = ["timestamp", "round_id", "mode", "difficulty", "question", "correct_answer", "user_answer", "correct", "skipped", "latency_ms", "tags", "drill"];
+  var lines = [header.join(",")];
+  for (var i = 0; i < questions.length; i++) {
+    var q = questions[i];
+    lines.push(header.map(function (k) {
+      var v = q[k];
+      if (k === "tags") v = (v || []).join("|");
+      return csvEscape(v);
+    }).join(","));
+  }
+  return lines.join("\n");
+}
+
+function parseCSVLine(line) {
+  var out = [];
+  var cur = "";
+  var inQuotes = false;
+  for (var i = 0; i < line.length; i++) {
+    var c = line[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; }
+        else inQuotes = false;
+      } else cur += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ",") { out.push(cur); cur = ""; }
+      else cur += c;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
+function parseLegacyRow(cols) {
+  // cols.length is 8, 9, or 10
+  if (cols.length < 8) return null;
+  var timestamp = cols[0];
+  var mode = cols[1];
+  var difficulty = cols[2];
+  var round_seconds = Number(cols[3]);
+  var asked = Number(cols[4]);
+  var correct = Number(cols[5]);
+  var accuracy = Number(cols[6]);
+  var avg_time_ms = Number(cols[7]);
+  var stage = cols.length >= 10 ? cols[9] : undefined;
+
+  if (mode === "mult-beginner" && difficulty === "n/a") {
+    mode = "mul";
+    difficulty = "beginner";
+  }
+
+  if (SETTINGS.modes.indexOf(mode) === -1) return null;
+  if (SETTINGS.difficulties.indexOf(difficulty) === -1) return null;
+  if (isNaN(asked)) return null;
+
+  var row = {
+    timestamp: timestamp,
+    mode: mode,
+    difficulty: difficulty,
+    round_seconds: isNaN(round_seconds) ? SETTINGS.roundSeconds : round_seconds,
+    asked: asked,
+    correct: isNaN(correct) ? 0 : correct,
+    accuracy: isNaN(accuracy) ? 0 : accuracy,
+    avg_time_ms: isNaN(avg_time_ms) ? 0 : avg_time_ms,
+    round_id: "legacy-" + timestamp + "-" + mode + "-" + difficulty,
+    drill: false,
+    legacy: true
+  };
+  if (stage !== undefined) row.stage = stage;
+  return row;
+}
+
+function importLegacyCSV(text, existingRounds) {
+  var lines = text.split(/\r?\n/).filter(function (l) { return l.trim().length > 0; });
+  if (!lines.length) return { imported: [], skipped: 0 };
+  var startIdx = /^timestamp,/i.test(lines[0]) ? 1 : 0;
+  var existingKeys = {};
+  for (var i = 0; i < existingRounds.length; i++) {
+    var er = existingRounds[i];
+    existingKeys[er.timestamp + "|" + er.mode + "|" + er.difficulty] = true;
+  }
+  var imported = [];
+  var skipped = 0;
+  for (var j = startIdx; j < lines.length; j++) {
+    var cols = parseCSVLine(lines[j]);
+    var row = parseLegacyRow(cols);
+    if (!row) { skipped++; continue; }
+    if (row.asked < 5) { skipped++; continue; }
+    var key = row.timestamp + "|" + row.mode + "|" + row.difficulty;
+    if (existingKeys[key]) { skipped++; continue; }
+    existingKeys[key] = true;
+    imported.push(row);
+  }
+  return { imported: imported, skipped: skipped };
+}
+
+function triggerDownload(filename, text) {
+  var blob = new Blob([text], { type: "text/csv" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+}
+
+/* ============================================================
+   ID / TIME HELPERS
+   ============================================================ */
+function makeRoundId() {
+  return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+}
+function nowISO() {
+  return new Date().toISOString();
+}
+function fmtPct(n) {
+  return (Math.round(n * 10) / 10) + "%";
+}
+function fmtMs(n) {
+  return Math.round(n) + "ms";
+}
+
+/* ============================================================
+   UI STATE
+   ============================================================ */
+var els = {};
+var round = null; // active round state
+var toastTimer = null;
+
+function $(id) { return document.getElementById(id); }
+
+function showToast(msg) {
+  var t = els.toast;
+  if (!t) return;
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { t.classList.remove("show"); }, 2200);
+}
+
+function showView(name) {
+  var views = document.querySelectorAll(".view");
+  for (var i = 0; i < views.length; i++) views[i].classList.remove("active");
+  var target = $("view-" + name);
+  if (target) target.classList.add("active");
+}
+
+/* ============================================================
+   DASHBOARD RENDERING
+   ============================================================ */
+function renderDashboard() {
+  var rounds = getRounds();
+  var questions = getQuestions();
+  var unlocked = refreshUnlocks(rounds, questions);
+
+  var container = $("mode-cards");
+  container.innerHTML = "";
+
+  for (var i = 0; i < SETTINGS.modes.length; i++) {
+    var mode = SETTINGS.modes[i];
+    var level = currentLevel(mode, unlocked);
+    var gate = computeGate(mode, level, rounds, questions);
+    var weak = weakestTags(gate.tagStats, SETTINGS.weakSpot.weakTagCount);
+
+    var lastN = gate.window.length;
+    var avgAcc = lastN ? (gate.window.reduce(function (s, r) { return s + r.accuracy; }, 0) / lastN) : null;
+    var avgTime = lastN ? (gate.window.reduce(function (s, r) { return s + r.avg_time_ms; }, 0) / lastN) : null;
+
+    var card = document.createElement("div");
+    card.className = "card";
+
+    var badgeClass = gate.status.toLowerCase();
+    var weakHtml = weak.length
+      ? weak.map(function (w) { return w.tag + " (" + fmtPct(w.missRate * 100) + " miss)"; }).join(", ")
+      : "not enough data yet";
+
+    var advancedLocked = !unlocked[mode];
+
+    card.innerHTML =
+      '<div class="row"><h2>' + SETTINGS.modeLabels[mode] + '</h2>' +
+      '<span class="badge ' + badgeClass + '">' + gate.label + '</span></div>' +
+      '<div class="muted">Level: ' + level + '</div>' +
+      '<div class="stats-line">' +
+        '<div class="stat">Last ' + lastN + '/3 acc<b>' + (avgAcc == null ? "-" : fmtPct(avgAcc)) + '</b></div>' +
+        '<div class="stat">Avg time<b>' + (avgTime == null ? "-" : fmtMs(avgTime)) + '</b></div>' +
+      '</div>' +
+      '<div class="tags-line">Weakest: ' + weakHtml + '</div>' +
+      '<div class="btn-row">' +
+        '<button class="action secondary" data-play="' + mode + '|beginner">Practice beginner</button>' +
+        '<button class="action" data-play="' + mode + '|' + level + '">Practice ' + level + '</button>' +
+      '</div>' +
+      (advancedLocked ? '<div class="muted" style="margin-top:6px;">Advanced locked until intermediate reaches Advance.</div>' : '') +
+      (gate.status === "Drill" ? '<div class="btn-row" style="margin-top:8px;"><button class="action warn" data-drill="' + mode + '|' + level + '">Weak-spot round</button></div>' : '');
+
+    container.appendChild(card);
+  }
+
+  var soonContainer = $("soon-cards");
+  soonContainer.innerHTML = "";
+  for (var j = 0; j < SETTINGS.comingSoonModes.length; j++) {
+    var sm = SETTINGS.comingSoonModes[j];
+    var row = document.createElement("div");
+    row.className = "row";
+    row.style.padding = "6px 0";
+    row.innerHTML = '<span>' + SETTINGS.soonLabels[sm] + '</span><span class="badge soon">Coming soon</span>';
+    soonContainer.appendChild(row);
+  }
+
+  bindDashboardActions();
+}
+
+function bindDashboardActions() {
+  var playBtns = document.querySelectorAll("[data-play]");
+  for (var i = 0; i < playBtns.length; i++) {
+    playBtns[i].onclick = function () {
+      var parts = this.getAttribute("data-play").split("|");
+      startRound(parts[0], parts[1], false);
+    };
+  }
+  var drillBtns = document.querySelectorAll("[data-drill]");
+  for (var j = 0; j < drillBtns.length; j++) {
+    drillBtns[j].onclick = function () {
+      var parts = this.getAttribute("data-drill").split("|");
+      startRound(parts[0], parts[1], true);
+    };
+  }
+}
+
+function buildTodaysPlan() {
+  var rounds = getRounds();
+  var questions = getQuestions();
+  var unlocked = refreshUnlocks(rounds, questions);
+  var priority = { Drill: 0, Calibrating: 1, Hold: 2, Advance: 3 };
+  var entries = SETTINGS.modes.map(function (mode) {
+    var level = currentLevel(mode, unlocked);
+    var gate = computeGate(mode, level, rounds, questions);
+    return { mode: mode, level: level, status: gate.status };
+  });
+  entries.sort(function (a, b) { return priority[a.status] - priority[b.status]; });
+  var plan = entries.slice(0, 3);
+
+  var listEl = $("plan-list");
+  listEl.innerHTML = "";
+  for (var i = 0; i < plan.length; i++) {
+    var p = plan[i];
+    var item = document.createElement("div");
+    item.className = "plan-item";
+    item.innerHTML = '<span>' + SETTINGS.modeLabels[p.mode] + ' &middot; ' + p.level + ' (' + p.status + ')</span>' +
+      '<button class="action" style="flex:none;padding:6px 10px;" data-play="' + p.mode + '|' + p.level + '">Go</button>';
+    listEl.appendChild(item);
+  }
+  $("plan-card").style.display = plan.length ? "block" : "none";
+  bindDashboardActions();
+}
+
+/* ============================================================
+   ROUND ENGINE
+   ============================================================ */
+function startRound(mode, difficulty, drill) {
+  var rounds = getRounds();
+  var questions = getQuestions();
+  var gateBefore = computeGate(mode, difficulty, rounds, questions);
+  var weakTags = drill ? weakestTags(gateBefore.tagStats, SETTINGS.weakSpot.weakTagCount).map(function (t) { return t.tag; }) : [];
+
+  round = {
+    mode: mode,
+    difficulty: difficulty,
+    drill: !!drill,
+    roundId: makeRoundId(),
+    startedAt: Date.now(),
+    endsAt: Date.now() + SETTINGS.roundSeconds * 1000,
+    seen: {},
+    log: [],
+    current: null,
+    questionStartedAt: 0,
+    answerBuffer: "",
+    gateBefore: gateBefore,
+    weakTags: weakTags,
+    timerHandle: null,
+    ended: false
+  };
+
+  $("round-label").textContent = SETTINGS.modeLabels[mode] + " · " + difficulty + (drill ? " · drill" : "");
+  showView("round");
+  nextQuestion();
+  round.timerHandle = setInterval(tickTimer, 100);
+  tickTimer();
+}
+
+function tickTimer() {
+  if (!round || round.ended) return;
+  var remaining = round.endsAt - Date.now();
+  if (remaining <= 0) {
+    endRound();
+    return;
+  }
+  var pct = Math.max(0, remaining / (SETTINGS.roundSeconds * 1000));
+  $("timer-bar").style.width = (pct * 100) + "%";
+  $("timer-num").textContent = Math.ceil(remaining / 1000) + "s";
+}
+
+function pickNextQuestion() {
+  var seenSet = { has: function (q) { return !!round.seen[q]; } };
+  var useWeak = round.drill && round.weakTags.length > 0 && Math.random() < SETTINGS.weakSpot.regenFraction;
+  var cand = generateUnique(round.mode, round.difficulty, seenSet, useWeak ? round.weakTags : null);
+  round.seen[cand.question] = true;
+  return cand;
+}
+
+function nextQuestion() {
+  if (!round || round.ended) return;
+  round.current = pickNextQuestion();
+  round.answerBuffer = "";
+  round.questionStartedAt = Date.now();
+  $("question-text").textContent = round.current.question + " = ?";
+  $("answer-display").innerHTML = "&nbsp;";
+  $("feedback").textContent = "";
+  $("feedback").className = "feedback";
+  renderKeypad();
+}
+
+function renderKeypad() {
+  var pad = $("keypad");
+  pad.innerHTML = "";
+  var keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "⌫"];
+  for (var i = 0; i < keys.length; i++) {
+    (function (key) {
+      var btn = document.createElement("button");
+      btn.textContent = key;
+      btn.onclick = function () { onKeypadPress(key); };
+      pad.appendChild(btn);
+    })(keys[i]);
+  }
+}
+
+function onKeypadPress(key) {
+  if (!round || round.ended) return;
+  if (key === "⌫") {
+    round.answerBuffer = round.answerBuffer.slice(0, -1);
+  } else if (key === ".") {
+    if (round.answerBuffer.indexOf(".") === -1) round.answerBuffer += ".";
+  } else {
+    round.answerBuffer += key;
+  }
+  $("answer-display").textContent = round.answerBuffer || " ";
+}
+
+function submitAnswer() {
+  if (!round || round.ended) return;
+  if (round.answerBuffer === "") return; // empty submit does nothing
+  var latency = Date.now() - round.questionStartedAt;
+  var userVal = parseFloat(round.answerBuffer);
+  var correct = !isNaN(userVal) && Math.abs(userVal - round.current.answer) < 1e-9;
+
+  logQuestion({
+    question: round.current.question + " = ?",
+    correct_answer: round.current.answer,
+    user_answer: round.answerBuffer,
+    correct: correct,
+    skipped: false,
+    latency_ms: latency,
+    tags: round.current.tags
+  });
+
+  var fb = $("feedback");
+  if (correct) {
+    fb.textContent = "Correct · " + latency + "ms";
+    fb.className = "feedback correct";
+  } else {
+    fb.textContent = "Wrong · answer " + round.current.answer + " · " + latency + "ms";
+    fb.className = "feedback incorrect";
+  }
+
+  setTimeout(function () {
+    if (!round || round.ended) return;
+    nextQuestion();
+  }, SETTINGS.feedbackDelayMs);
+}
+
+function skipQuestion() {
+  if (!round || round.ended) return;
+  logQuestion({
+    question: round.current.question + " = ?",
+    correct_answer: round.current.answer,
+    user_answer: "",
+    correct: false,
+    skipped: true,
+    latency_ms: null,
+    tags: round.current.tags
+  });
+  nextQuestion();
+}
+
+function logQuestion(partial) {
+  var entry = {
+    timestamp: nowISO(),
+    round_id: round.roundId,
+    mode: round.mode,
+    difficulty: round.difficulty,
+    question: partial.question,
+    correct_answer: partial.correct_answer,
+    user_answer: partial.user_answer,
+    correct: partial.correct,
+    skipped: partial.skipped,
+    latency_ms: partial.latency_ms,
+    tags: partial.tags,
+    drill: round.drill
+  };
+  round.log.push(entry);
+}
+
+function endRound() {
+  if (!round || round.ended) return;
+  round.ended = true;
+  clearInterval(round.timerHandle);
+
+  var answered = round.log.filter(function (q) { return !q.skipped; });
+  var correctList = answered.filter(function (q) { return q.correct; });
+  var asked = answered.length;
+  var correct = correctList.length;
+  var accuracy = asked ? (correct / asked * 100) : 0;
+  var avgTime = asked ? (answered.reduce(function (s, q) { return s + q.latency_ms; }, 0) / asked) : 0;
+
+  var roundRecord = {
+    timestamp: nowISO(),
+    mode: round.mode,
+    difficulty: round.difficulty,
+    round_seconds: SETTINGS.roundSeconds,
+    asked: asked,
+    correct: correct,
+    accuracy: Math.round(accuracy * 10) / 10,
+    avg_time_ms: Math.round(avgTime),
+    round_id: round.roundId,
+    drill: round.drill,
+    legacy: false
+  };
+
+  addQuestions(round.log);
+  addRound(roundRecord);
+  refreshUnlocks(getRounds(), getQuestions());
+
+  var gateAfter = computeGate(round.mode, round.difficulty, getRounds(), getQuestions());
+  renderSummary(round, roundRecord, round.gateBefore, gateAfter);
+  showView("summary");
+}
+
+function renderSummary(roundState, record, gateBefore, gateAfter) {
+  $("sum-asked").textContent = record.asked;
+  $("sum-correct").textContent = record.correct;
+  $("sum-accuracy").textContent = fmtPct(record.accuracy);
+  $("sum-avg").textContent = fmtMs(record.avg_time_ms);
+  $("sum-gate-before").textContent = gateBefore.label;
+  $("sum-gate-after").textContent = gateAfter.label;
+
+  var misses = roundState.log.filter(function (q) { return !q.skipped && !q.correct; });
+  var missesEl = $("sum-misses");
+  missesEl.innerHTML = "";
+  if (!misses.length) {
+    missesEl.innerHTML = '<div class="muted">None</div>';
+  } else {
+    misses.forEach(function (m) {
+      var row = document.createElement("div");
+      row.className = "miss-row";
+      row.innerHTML = '<span>' + m.question + '</span><span>you: ' + m.user_answer + ' · correct: ' + m.correct_answer + '</span>';
+      missesEl.appendChild(row);
+    });
+  }
+
+  var slowest = roundState.log
+    .filter(function (q) { return !q.skipped && q.correct; })
+    .sort(function (a, b) { return b.latency_ms - a.latency_ms; })
+    .slice(0, 3);
+  var slowestEl = $("sum-slowest");
+  slowestEl.innerHTML = "";
+  if (!slowest.length) {
+    slowestEl.innerHTML = '<div class="muted">None</div>';
+  } else {
+    slowest.forEach(function (s) {
+      var row = document.createElement("div");
+      row.className = "slowest-row";
+      row.innerHTML = '<span>' + s.question + '</span><span>' + s.latency_ms + 'ms</span>';
+      slowestEl.appendChild(row);
+    });
+  }
+}
+
+/* ============================================================
+   HISTORY
+   ============================================================ */
+function renderHistory() {
+  var rounds = getRounds().slice().sort(function (a, b) { return new Date(b.timestamp) - new Date(a.timestamp); });
+  var body = $("history-body");
+  body.innerHTML = "";
+  rounds.forEach(function (r) {
+    var tr = document.createElement("tr");
+    var flags = [];
+    if (r.drill) flags.push("drill");
+    if (r.legacy) flags.push("legacy");
+    var when = new Date(r.timestamp);
+    var whenStr = isNaN(when.getTime()) ? r.timestamp : when.toLocaleString();
+    tr.innerHTML =
+      "<td>" + whenStr + "</td>" +
+      "<td>" + r.mode + "</td>" +
+      "<td>" + r.difficulty + "</td>" +
+      "<td>" + r.asked + "</td>" +
+      "<td>" + fmtPct(r.accuracy) + "</td>" +
+      "<td>" + fmtMs(r.avg_time_ms) + "</td>" +
+      '<td class="legacy-tag">' + flags.join(", ") + "</td>";
+    body.appendChild(tr);
+  });
+}
+
+/* ============================================================
+   IMPORT / EXPORT HANDLERS
+   ============================================================ */
+function handleImportFile(file) {
+  var reader = new FileReader();
+  reader.onload = function () {
+    var result = importLegacyCSV(String(reader.result), getRounds());
+    if (result.imported.length) {
+      var rounds = getRounds();
+      for (var i = 0; i < result.imported.length; i++) rounds.push(result.imported[i]);
+      saveRounds(rounds);
+    }
+    showToast("Imported " + result.imported.length + " rounds, skipped " + result.skipped + ".");
+    renderDashboard();
+    renderHistory();
+  };
+  reader.readAsText(file);
+}
+
+function handleExport() {
+  triggerDownload("rounds.csv", roundsToCSV(getRounds()));
+  triggerDownload("questions.csv", questionsToCSV(getQuestions()));
+}
+
+/* ============================================================
+   INIT
+   ============================================================ */
+function bindStaticEvents() {
+  var navBtns = document.querySelectorAll("[data-nav]");
+  for (var i = 0; i < navBtns.length; i++) {
+    navBtns[i].onclick = function () {
+      var target = this.getAttribute("data-nav");
+      showView(target);
+      if (target === "history") renderHistory();
+      if (target === "home") renderDashboard();
+    };
+  }
+
+  $("btn-build-plan").onclick = buildTodaysPlan;
+  $("btn-submit").onclick = submitAnswer;
+  $("btn-skip").onclick = skipQuestion;
+  $("btn-summary-home").onclick = function () { showView("home"); renderDashboard(); };
+
+  $("btn-import").onclick = function () { $("file-import").click(); };
+  $("file-import").onchange = function (e) {
+    if (e.target.files && e.target.files[0]) handleImportFile(e.target.files[0]);
+    e.target.value = "";
+  };
+  $("btn-export").onclick = handleExport;
+}
+
+function init() {
+  els.toast = $("toast");
+  bindStaticEvents();
+  renderDashboard();
+  showView("home");
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("sw.js").catch(function () {});
+  }
+}
+
+if (typeof document !== "undefined" && document.addEventListener) {
+  document.addEventListener("DOMContentLoaded", init);
+}
+</script>
+</body>
+</html>
