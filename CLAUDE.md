@@ -5,7 +5,7 @@ Mental math practice app: the original Python terminal game plus a mobile PWA po
 ## Layout
 - `mental_math_game.py`, `config.json`, `pct_stage.json`, `README.md`, `30_day_bootcamp.md`: original app and reference docs. DO NOT modify, move, or delete.
 - `progress.csv`: personal legacy data. Gitignored. Never commit, never edit.
-- `docs/`: the phone app, served by GitHub Pages. `index.html`, `manifest.json`, `sw.js`, `icon-192.png`, `icon-512.png`.
+- `docs/`: the phone app, served by GitHub Pages. `index.html`, `manifest.json`, `sw.js`, `icon-192.png`, `icon-512.png`, `.nojekyll` (disables Jekyll processing on GitHub Pages).
 - `tests/`: Node test scripts. Not deployed.
 
 ## Hard rules
@@ -18,6 +18,7 @@ Mental math practice app: the original Python terminal game plus a mobile PWA po
 - One logical change per commit, clear message.
 - Repo is public: no personal data, names, or real progress numbers in code, tests, fixtures, or commits.
 - When a spec decision changes, update this file in the same commit as the code.
+- All localStorage keys use the `mma_` prefix. Never write unprefixed keys.
 
 ## Commands
 - Local preview: `python -m http.server 8000 -d docs` then open http://localhost:8000
@@ -96,7 +97,7 @@ Weakest tags: rank by miss rate, tiebreak by avg latency, minimum 3 attempts.
   - Skip rows with `asked < 5`
   - Dedupe on `timestamp + mode + difficulty`
   - Set `legacy=true`: visible in history, never counts toward gates
-- **Export**: downloads `rounds.csv` and `questions.csv`.
+- **Export**: two separate buttons, Export rounds.csv and Export questions.csv, each triggering exactly one download (Android Chrome blocks back-to-back downloads).
 
 ## Known Python bugs (reference only; do not fix the .py)
 - Empty input ends the round.
