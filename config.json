@@ -1,0 +1,18 @@
+{
+  "round_seconds": 300,
+  "beginner_max": 20,
+  "intermediate_max": 100,
+  "advanced_max": 999,
+  "percent_bases": [
+    1,
+    5,
+    10,
+    15,
+    20,
+    25,
+    33.3333,
+    50,
+    66.6667,
+    75
+  ]
+}
