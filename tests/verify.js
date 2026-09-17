@@ -3,8 +3,10 @@ const path = require("path");
 const vm = require("vm");
 const assert = require("assert");
 
+const htmlSource = fs.readFileSync(path.join(__dirname, "..", "docs", "index.html"), "utf8");
+
 function loadApp() {
-  const html = fs.readFileSync(path.join(__dirname, "..", "docs", "index.html"), "utf8");
+  const html = htmlSource;
   const match = html.match(/<script>([\s\S]*?)<\/script>/);
   if (!match) throw new Error("Could not find inline script in docs/index.html");
   const code = match[1];
@@ -393,6 +395,65 @@ test("duplicate timestamp+mode+difficulty is deduped", () => {
 test("10-column row keeps pct stage name", () => {
   const row = app.parseLegacyRow(["2025-01-01T00:00:00", "add", "beginner", "60", "20", "19", "95.0", "3000", "x", "stage4"]);
   assert.strictEqual(row.stage, "stage4");
+});
+
+console.log("Storage key namespacing");
+
+test("storage keys use an app-specific prefix, not a generic one", () => {
+  assert.ok(app.SETTINGS.storageKeys.rounds.indexOf("mma_") === 0);
+  assert.ok(app.SETTINGS.storageKeys.questions.indexOf("mma_") === 0);
+  assert.ok(app.SETTINGS.storageKeys.unlocked.indexOf("mma_") === 0);
+});
+
+test("migrateLegacyStorageKeys moves old unprefixed data to the new keys", () => {
+  const fresh = loadApp();
+  fresh.localStorage.setItem("mm_rounds", JSON.stringify([{ mode: "add" }]));
+  fresh.localStorage.setItem("mm_questions", JSON.stringify([{ mode: "add" }]));
+  fresh.localStorage.setItem("mm_unlocked", JSON.stringify({ add: true }));
+
+  fresh.migrateLegacyStorageKeys();
+
+  assert.strictEqual(fresh.localStorage.getItem("mm_rounds"), null, "old rounds key should be removed");
+  assert.strictEqual(fresh.getRounds().length, 1);
+  assert.strictEqual(fresh.getQuestions().length, 1);
+  assert.strictEqual(fresh.getUnlocked().add, true);
+});
+
+test("migration does not overwrite data already present under the new keys", () => {
+  const fresh = loadApp();
+  fresh.localStorage.setItem("mm_rounds", JSON.stringify([{ mode: "old" }]));
+  fresh.saveRounds([{ mode: "new" }]);
+
+  fresh.migrateLegacyStorageKeys();
+
+  assert.strictEqual(fresh.getRounds().length, 1);
+  assert.strictEqual(fresh.getRounds()[0].mode, "new");
+});
+
+console.log("Export uses two separate buttons (avoids Android Chrome multi-download block)");
+
+test("two distinct export buttons exist, each bound to its own single download", () => {
+  assert.ok(/id="btn-export-rounds"/.test(htmlSource), "expected a dedicated rounds export button");
+  assert.ok(/id="btn-export-questions"/.test(htmlSource), "expected a dedicated questions export button");
+  assert.strictEqual(typeof app.handleExportRounds, "function");
+  assert.strictEqual(typeof app.handleExportQuestions, "function");
+  assert.strictEqual(app.handleExport, undefined, "combined single-button export handler should be gone");
+});
+
+test("handleExportRounds triggers exactly one download, for rounds.csv only", () => {
+  const fresh = loadApp();
+  const calls = [];
+  fresh.triggerDownload = (filename) => calls.push(filename);
+  fresh.handleExportRounds();
+  assert.deepStrictEqual(calls, ["rounds.csv"]);
+});
+
+test("handleExportQuestions triggers exactly one download, for questions.csv only", () => {
+  const fresh = loadApp();
+  const calls = [];
+  fresh.triggerDownload = (filename) => calls.push(filename);
+  fresh.handleExportQuestions();
+  assert.deepStrictEqual(calls, ["questions.csv"]);
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

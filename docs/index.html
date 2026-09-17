@@ -177,7 +177,10 @@
         <h2>Import / Export</h2>
         <div class="btn-row">
           <button class="action secondary" id="btn-import">Import CSV</button>
-          <button class="action secondary" id="btn-export">Export CSV</button>
+        </div>
+        <div class="btn-row" style="margin-top:8px;">
+          <button class="action secondary" id="btn-export-rounds">Export rounds.csv</button>
+          <button class="action secondary" id="btn-export-questions">Export questions.csv</button>
         </div>
         <input type="file" id="file-import" accept=".csv,text/csv">
       </div>
@@ -298,9 +301,9 @@ var SETTINGS = {
   feedbackDelayMs: 1100,
 
   storageKeys: {
-    rounds: "mm_rounds",
-    questions: "mm_questions",
-    unlocked: "mm_unlocked"
+    rounds: "mma_rounds",
+    questions: "mma_questions",
+    unlocked: "mma_unlocked"
   },
 
   modeLabels: { add: "Addition", sub: "Subtraction", mul: "Multiplication", div: "Division" },
@@ -310,6 +313,26 @@ var SETTINGS = {
 /* ============================================================
    STORAGE
    ============================================================ */
+var LEGACY_STORAGE_KEYS = {
+  rounds: "mm_rounds",
+  questions: "mm_questions",
+  unlocked: "mm_unlocked"
+};
+
+function migrateLegacyStorageKeys() {
+  for (var name in LEGACY_STORAGE_KEYS) {
+    var oldKey = LEGACY_STORAGE_KEYS[name];
+    var newKey = SETTINGS.storageKeys[name];
+    try {
+      var oldVal = localStorage.getItem(oldKey);
+      if (oldVal != null && localStorage.getItem(newKey) == null) {
+        localStorage.setItem(newKey, oldVal);
+        localStorage.removeItem(oldKey);
+      }
+    } catch (e) {}
+  }
+}
+
 function readJSON(key, fallback) {
   try {
     var raw = localStorage.getItem(key);
@@ -1158,8 +1181,11 @@ function handleImportFile(file) {
   reader.readAsText(file);
 }
 
-function handleExport() {
+function handleExportRounds() {
   triggerDownload("rounds.csv", roundsToCSV(getRounds()));
+}
+
+function handleExportQuestions() {
   triggerDownload("questions.csv", questionsToCSV(getQuestions()));
 }
 
@@ -1187,10 +1213,12 @@ function bindStaticEvents() {
     if (e.target.files && e.target.files[0]) handleImportFile(e.target.files[0]);
     e.target.value = "";
   };
-  $("btn-export").onclick = handleExport;
+  $("btn-export-rounds").onclick = handleExportRounds;
+  $("btn-export-questions").onclick = handleExportQuestions;
 }
 
 function init() {
+  migrateLegacyStorageKeys();
   els.toast = $("toast");
   bindStaticEvents();
   renderDashboard();

@@ -50,6 +50,7 @@ Match the Python file unless noted. Inclusive ranges, operands drawn independent
 ## Levels
 - All four modes start at intermediate. Beginner shows as complete but stays playable.
 - Advanced is locked per mode until that mode's intermediate gate returns Advance.
+- Advanced unlock is sticky: once a mode's intermediate gate returns Advance, advanced stays unlocked even if later rounds drop the gate.
 
 ## Data (localStorage)
 - Round log: `timestamp, mode, difficulty, round_seconds, asked, correct, accuracy, avg_time_ms, round_id, drill, legacy, stage`
