@@ -485,6 +485,27 @@ test("generateUnique with target tag returns a matching question", () => {
   }
 });
 
+console.log("len_mismatch typing-error flag");
+
+test("lenMismatch: wrong with different digit count only", () => {
+  assert.strictEqual(app.lenMismatch(false, "1135", "135"), true);
+  assert.strictEqual(app.lenMismatch(false, "136", "135"), false);
+  assert.strictEqual(app.lenMismatch(true, "135", "135"), false);
+  assert.strictEqual(app.lenMismatch(false, "13", 135), true);
+});
+
+test("questions.csv has len_mismatch as the last column", () => {
+  const csv = app.questionsToCSV([
+    { question: "52 + 61 = ?", correct_answer: 113, user_answer: "1113", correct: false, skipped: false, tags: ["carry:tens"], len_mismatch: true },
+    { question: "52 + 61 = ?", correct_answer: 113, user_answer: "", correct: false, skipped: true, tags: ["carry:tens"] }
+  ]);
+  const lines = csv.split("\n");
+  const header = lines[0].split(",");
+  assert.strictEqual(header[header.length - 1], "len_mismatch");
+  assert.ok(lines[1].endsWith(",true"));
+  assert.ok(lines[2].endsWith(",false"), "skipped rows are never len_mismatch");
+});
+
 console.log("CSV import mapping");
 
 test("mult-beginner / n/a maps to mul / beginner", () => {

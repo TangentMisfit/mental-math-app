@@ -56,7 +56,8 @@ Match the Python file unless noted. Inclusive ranges, operands drawn independent
 
 ## Data (localStorage)
 - Round log: `timestamp, mode, difficulty, round_seconds, asked, correct, accuracy, avg_time_ms, round_id, drill, legacy, stage`
-- Question log: `timestamp, round_id, mode, difficulty, question, correct_answer, user_answer, correct, skipped, latency_ms, tags, drill`
+- Question log: `timestamp, round_id, mode, difficulty, question, correct_answer, user_answer, correct, skipped, latency_ms, tags, drill, len_mismatch`
+- `len_mismatch`: true when the answer is wrong AND the user's answer has a different digit count than the correct answer (likely typo). Always false for skipped rows. Scoring unchanged: still a wrong answer. Rows logged before this column existed have it computed on export.
 
 ## Tags (computed at generation)
 Positional carry/borrow: list the columns that produce a carry (add) or need a borrow (sub), lowest first, joined with `+`, using `ones`, `tens`, `hundreds` (`thousands`, `tenthousands` for mul). None = `carry:none` / `borrow:none`. Work column by column including the incoming carry/borrow; a chained carry counts in the column where it happens.
@@ -106,6 +107,7 @@ Weakest tags: rank by miss rate, tiebreak by avg latency, minimum 3 attempts.
   - Dedupe on `timestamp + mode + difficulty`
   - Set `legacy=true`: visible in history, never counts toward gates
 - **Export**: two separate buttons, Export rounds.csv and Export questions.csv, each triggering exactly one download (Android Chrome blocks back-to-back downloads).
+  - questions.csv columns, in order: `timestamp, round_id, mode, difficulty, question, correct_answer, user_answer, correct, skipped, latency_ms, tags, drill, len_mismatch` (tags joined with `|`, as stored).
 
 ## Known Python bugs (reference only; do not fix the .py)
 - Empty input ends the round.

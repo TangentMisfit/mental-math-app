@@ -644,6 +644,17 @@ function pickWeightedTag(weights) {
 }
 
 /* ============================================================
+   ANSWER HELPERS
+   ============================================================ */
+function digitCount(v) {
+  return String(v == null ? "" : v).replace(/[^0-9]/g, "").length;
+}
+// Likely typing error: wrong answer with a different digit count.
+function lenMismatch(correct, userAnswer, correctAnswer) {
+  return !correct && digitCount(userAnswer) !== digitCount(correctAnswer);
+}
+
+/* ============================================================
    TAG STATS / GATES
    ============================================================ */
 function getQualifyingRounds(rounds, mode, difficulty) {
@@ -784,13 +795,14 @@ function roundsToCSV(rounds) {
 }
 
 function questionsToCSV(questions) {
-  var header = ["timestamp", "round_id", "mode", "difficulty", "question", "correct_answer", "user_answer", "correct", "skipped", "latency_ms", "tags", "drill"];
+  var header = ["timestamp", "round_id", "mode", "difficulty", "question", "correct_answer", "user_answer", "correct", "skipped", "latency_ms", "tags", "drill", "len_mismatch"];
   var lines = [header.join(",")];
   for (var i = 0; i < questions.length; i++) {
     var q = questions[i];
     lines.push(header.map(function (k) {
       var v = q[k];
       if (k === "tags") v = (v || []).join("|");
+      if (k === "len_mismatch" && v == null) v = !q.skipped && lenMismatch(q.correct, q.user_answer, q.correct_answer);
       return csvEscape(v);
     }).join(","));
   }
@@ -1196,7 +1208,8 @@ function logQuestion(partial) {
     skipped: partial.skipped,
     latency_ms: partial.latency_ms,
     tags: partial.tags,
-    drill: round.drill
+    drill: round.drill,
+    len_mismatch: !partial.skipped && lenMismatch(partial.correct, partial.user_answer, partial.correct_answer)
   };
   round.log.push(entry);
 }
