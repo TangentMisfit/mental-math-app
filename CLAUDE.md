@@ -65,7 +65,7 @@ Positional carry/borrow: list the columns that produce a carry (add) or need a b
 - mul: `x<d>` when one operand is single-digit (e.g. `x7`), plus a positional `carry:` tag over absolute answer columns where a carry happens in any partial product or in summing them (multi-digit operand is the multiplicand). e.g. 87×6 → `x6`, `carry:ones+tens`; 23×45 → `carry:ones+tens+hundreds`
 - div: `div<divisor>` (e.g. `div7`)
 - Reachable tags: add intermediate `carry:none|ones|tens|ones+tens`; add advanced all 8 combos of ones/tens/hundreds plus none; sub intermediate `borrow:none|ones|ones+tens` (the last only with 100 as minuend).
-- History: wherever tag stats are computed (gates, weakest tags), add/sub/mul tags are recomputed from the question text, not read from the stored `tags`. Stored rows are never rewritten.
+- History: wherever tag stats are computed (gates, weakest tags, drill weights), add/sub/mul tags are recomputed from the question text, not read from the stored `tags`. Stored rows are never rewritten.
 
 ## Gates (per mode + difficulty)
 Window: last 3 rounds with `drill=false`, `legacy=false`, and >= 10 answered.
@@ -90,7 +90,11 @@ Weakest tags: rank by miss rate, tiebreak by avg latency, minimum 3 attempts.
 ## Features
 - **Home dashboard**: one card per mode showing level, gate status, pooled window accuracy, avg time, top 2 weakest tags.
 - **Today's plan**: queues up to 3 rounds. Order: Drill, then Calibrating, then Hold.
-- **Weak-spot round** (modes in Drill): 60% of questions regenerated until they match the mode's 2 weakest tags (max 50 attempts per question, then fall back to normal), 40% normal. Logged `drill=true`.
+- **Weak-spot round** (modes in Drill), logged `drill=true`:
+  - 20% of questions: plain random from the normal generator.
+  - 80%: pick a target tag by weighted sampling, then rejection-sample the normal generator until the question has that tag (cap 200 tries, then any unseen problem).
+  - Candidate tags: every tag the current generator can produce for the mode+difficulty.
+  - Weight per tag = `max(miss_rate / 0.05, median_latency / speed_target)`, from the last 200 answered (non-skipped), non-legacy questions for that mode+difficulty (drill rows included). Tags with < 3 attempts get weight 1.
 - **End-of-round summary**: asked, correct, accuracy, avg time, gate status before and after (with pooled accuracy), every miss, 3 slowest correct answers.
 - Dark mode via `prefers-color-scheme`.
 

@@ -292,9 +292,21 @@ var SETTINGS = {
   },
 
   weakSpot: {
-    regenFraction: 0.6,
-    maxAttemptsPerQuestion: 50,
-    weakTagCount: 2
+    weakTagCount: 2 // weakest tags shown on the dashboard
+  },
+
+  // Drill (weak-spot) rounds: each question's target tag is drawn by weight.
+  // weight = max(missRate / missRateUnit, medianLatency / speedTarget) for tags
+  // with >= minAttempts in the last historyQuestions answered, non-legacy
+  // questions of that mode+difficulty; other tags get defaultWeight.
+  drill: {
+    unweightedFraction: 0.2,
+    missRateUnit: 0.05,
+    historyQuestions: 200,
+    minAttempts: 3,
+    defaultWeight: 1,
+    maxTriesPerQuestion: 200,
+    tagUniverseSamples: 2000
   },
 
   // Intermediate add/sub: reject operands < minOperand, second operand 0,
@@ -549,24 +561,86 @@ function generate(mode, difficulty) {
   return GENERATORS[mode](difficulty);
 }
 
-function generateUnique(mode, difficulty, seenSet, matchTags) {
-  var maxAttempts = matchTags ? SETTINGS.weakSpot.maxAttemptsPerQuestion : SETTINGS.uniqueQuestionMaxAttempts;
+// Unseen question; when targetTag is given, rejection-sample until the
+// question carries that tag (cap drill.maxTriesPerQuestion, then any unseen).
+function generateUnique(mode, difficulty, seenSet, targetTag) {
+  var maxAttempts = targetTag ? SETTINGS.drill.maxTriesPerQuestion : SETTINGS.uniqueQuestionMaxAttempts;
   var fallback = null;
   for (var i = 0; i < maxAttempts; i++) {
     var cand = generate(mode, difficulty);
     if (seenSet.has(cand.question)) continue;
-    if (matchTags && matchTags.length) {
-      var hit = false;
-      for (var k = 0; k < cand.tags.length; k++) {
-        if (matchTags.indexOf(cand.tags[k]) !== -1) { hit = true; break; }
-      }
-      if (!hit) { if (!fallback) fallback = cand; continue; }
+    if (targetTag && cand.tags.indexOf(targetTag) === -1) {
+      if (!fallback) fallback = cand;
+      continue;
     }
     return cand;
   }
   if (fallback) return fallback;
   // last resort: allow a repeat rather than looping forever
   return generate(mode, difficulty);
+}
+
+/* ============================================================
+   DRILL WEIGHTING
+   ============================================================ */
+function median(nums) {
+  if (!nums.length) return 0;
+  var s = nums.slice().sort(function (x, y) { return x - y; });
+  var mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+// Every tag the current generator can produce for mode+difficulty.
+function tagUniverse(mode, difficulty) {
+  var seen = {};
+  var out = [];
+  for (var i = 0; i < SETTINGS.drill.tagUniverseSamples; i++) {
+    var tags = generate(mode, difficulty).tags;
+    for (var t = 0; t < tags.length; t++) {
+      if (!seen[tags[t]]) { seen[tags[t]] = true; out.push(tags[t]); }
+    }
+  }
+  return out.sort();
+}
+
+// [{tag, weight, attempts}] for drill target-tag sampling.
+function drillTagWeights(mode, difficulty, questions, universe) {
+  var d = SETTINGS.drill;
+  var hist = questions.filter(function (q) {
+    return q.mode === mode && q.difficulty === difficulty && !q.legacy && !q.skipped;
+  }).slice(-d.historyQuestions);
+  var stats = {};
+  for (var i = 0; i < hist.length; i++) {
+    var tags = tagsForRow(hist[i]);
+    for (var t = 0; t < tags.length; t++) {
+      var s = stats[tags[t]] || (stats[tags[t]] = { attempts: 0, misses: 0, latencies: [] });
+      s.attempts++;
+      if (!hist[i].correct) s.misses++;
+      s.latencies.push(hist[i].latency_ms || 0);
+    }
+  }
+  var target = SETTINGS.speedTargetMs[mode][difficulty];
+  var tagList = universe || tagUniverse(mode, difficulty);
+  return tagList.map(function (tag) {
+    var s = stats[tag];
+    if (!s || s.attempts < d.minAttempts) {
+      return { tag: tag, weight: d.defaultWeight, attempts: s ? s.attempts : 0 };
+    }
+    var w = Math.max((s.misses / s.attempts) / d.missRateUnit, median(s.latencies) / target);
+    return { tag: tag, weight: w, attempts: s.attempts };
+  });
+}
+
+function pickWeightedTag(weights) {
+  var total = weights.reduce(function (sum, w) { return sum + w.weight; }, 0);
+  if (!weights.length) return null;
+  if (!(total > 0)) return weights[Math.floor(Math.random() * weights.length)].tag;
+  var r = Math.random() * total;
+  for (var i = 0; i < weights.length; i++) {
+    r -= weights[i].weight;
+    if (r < 0) return weights[i].tag;
+  }
+  return weights[weights.length - 1].tag;
 }
 
 /* ============================================================
@@ -975,7 +1049,7 @@ function startRound(mode, difficulty, drill) {
   var rounds = getRounds();
   var questions = getQuestions();
   var gateBefore = computeGate(mode, difficulty, rounds, questions);
-  var weakTags = drill ? weakestTags(gateBefore.tagStats, SETTINGS.weakSpot.weakTagCount).map(function (t) { return t.tag; }) : [];
+  var drillWeights = drill ? drillTagWeights(mode, difficulty, questions) : [];
 
   round = {
     mode: mode,
@@ -990,7 +1064,7 @@ function startRound(mode, difficulty, drill) {
     questionStartedAt: 0,
     answerBuffer: "",
     gateBefore: gateBefore,
-    weakTags: weakTags,
+    drillWeights: drillWeights,
     timerHandle: null,
     ended: false
   };
@@ -1016,8 +1090,11 @@ function tickTimer() {
 
 function pickNextQuestion() {
   var seenSet = { has: function (q) { return !!round.seen[q]; } };
-  var useWeak = round.drill && round.weakTags.length > 0 && Math.random() < SETTINGS.weakSpot.regenFraction;
-  var cand = generateUnique(round.mode, round.difficulty, seenSet, useWeak ? round.weakTags : null);
+  var targetTag = null;
+  if (round.drill && round.drillWeights.length && Math.random() >= SETTINGS.drill.unweightedFraction) {
+    targetTag = pickWeightedTag(round.drillWeights);
+  }
+  var cand = generateUnique(round.mode, round.difficulty, seenSet, targetTag);
   round.seen[cand.question] = true;
   return cand;
 }

@@ -428,6 +428,63 @@ test("Drill status unlocks nothing; Advance sets sticky unlock flag", () => {
   assert.strictEqual(app.currentLevel("div", unlocked), "advanced");
 });
 
+console.log("Drill weighting");
+
+function hq(question, correct, latency, extra) {
+  return Object.assign({ mode: "add", difficulty: "intermediate", question: question + " = ?", correct, skipped: false, latency_ms: latency }, extra || {});
+}
+
+test("drill weight = max(missRate/0.05, median latency/target); <3 attempts -> 1", () => {
+  const qs = [];
+  // carry:tens (52 + 61): 4 attempts, 1 miss -> 0.25/0.05 = 5
+  for (let i = 0; i < 4; i++) qs.push(hq("52 + 61", i !== 0, 1000));
+  // carry:ones (15 + 18): 3 correct, median 9000ms -> 9000/4500 = 2
+  qs.push(hq("15 + 18", true, 9000), hq("15 + 18", true, 9000), hq("15 + 18", true, 1000));
+  // carry:none (12 + 13): 2 attempts only -> default 1
+  qs.push(hq("12 + 13", false, 1000), hq("12 + 13", false, 1000));
+  const w = {};
+  app.drillTagWeights("add", "intermediate", qs, ["carry:none", "carry:ones", "carry:tens", "carry:ones+tens"])
+    .forEach((x) => { w[x.tag] = x.weight; });
+  assert.strictEqual(w["carry:tens"], 5);
+  assert.strictEqual(w["carry:ones"], 2);
+  assert.strictEqual(w["carry:none"], 1);
+  assert.strictEqual(w["carry:ones+tens"], 1);
+});
+
+test("drill weights ignore legacy, skipped, other modes, and only use last 200", () => {
+  const qs = [];
+  for (let i = 0; i < 5; i++) qs.push(hq("52 + 61", false, 1000, { legacy: true }));
+  for (let i = 0; i < 5; i++) qs.push(hq("52 + 61", false, 1000, { skipped: true }));
+  for (let i = 0; i < 5; i++) qs.push(hq("52 + 61", false, 1000, { difficulty: "advanced" }));
+  for (let i = 0; i < 5; i++) qs.push(hq("52 + 61", false, 1000)); // pushed out by the 200 below
+  for (let i = 0; i < 200; i++) qs.push(hq("12 + 13", true, 900));
+  const res = app.drillTagWeights("add", "intermediate", qs, ["carry:tens", "carry:none"]);
+  const tens = res.find((x) => x.tag === "carry:tens");
+  assert.strictEqual(tens.attempts, 0);
+  assert.strictEqual(tens.weight, 1);
+  assert.strictEqual(res.find((x) => x.tag === "carry:none").weight, 0.2);
+});
+
+test("tag universe for add intermediate has the 4 reachable carry tags", () => {
+  assert.deepStrictEqual(Array.from(app.tagUniverse("add", "intermediate")),
+    ["carry:none", "carry:ones", "carry:ones+tens", "carry:tens"]);
+});
+
+test("pickWeightedTag follows weights", () => {
+  const counts = { a: 0, b: 0 };
+  for (let i = 0; i < 4000; i++) counts[app.pickWeightedTag([{ tag: "a", weight: 3 }, { tag: "b", weight: 1 }])]++;
+  const ratio = counts.a / 4000;
+  assert.ok(ratio > 0.70 && ratio < 0.80, "ratio " + ratio);
+});
+
+test("generateUnique with target tag returns a matching question", () => {
+  const seenSet = { has: () => false };
+  for (let i = 0; i < 50; i++) {
+    const q = app.generateUnique("add", "advanced", seenSet, "carry:ones+tens+hundreds");
+    assert.ok(q.tags.indexOf("carry:ones+tens+hundreds") !== -1, q.question);
+  }
+});
+
 console.log("CSV import mapping");
 
 test("mult-beginner / n/a maps to mul / beginner", () => {
