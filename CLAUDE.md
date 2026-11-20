@@ -73,7 +73,7 @@ Window: last 3 rounds with `drill=false`, `legacy=false`, and >= 10 answered.
 Evaluate in this order; first match wins:
 1. **Calibrating**: fewer than 3 qualifying rounds. Display "Calibrating (n/3)".
 2. **Drill**: any round < 85% accuracy, OR any tag with >= 3 attempts in the window having miss rate >= 15% or avg latency >= 1.5× speed target.
-3. **Advance**: all 3 rounds >= 95% accuracy AND combined avg latency <= speed target. Unlocks the next difficulty.
+3. **Advance**: pooled accuracy across the 3 window rounds (sum correct / sum answered) >= 95% AND every window round >= 90% AND combined avg latency <= speed target. Unlocks the next difficulty.
 4. **Hold**: everything else.
 
 Speed targets (ms):
@@ -88,10 +88,10 @@ Speed targets (ms):
 Weakest tags: rank by miss rate, tiebreak by avg latency, minimum 3 attempts.
 
 ## Features
-- **Home dashboard**: one card per mode showing level, gate status, last-3 accuracy and avg time, top 2 weakest tags.
+- **Home dashboard**: one card per mode showing level, gate status, pooled window accuracy, avg time, top 2 weakest tags.
 - **Today's plan**: queues up to 3 rounds. Order: Drill, then Calibrating, then Hold.
 - **Weak-spot round** (modes in Drill): 60% of questions regenerated until they match the mode's 2 weakest tags (max 50 attempts per question, then fall back to normal), 40% normal. Logged `drill=true`.
-- **End-of-round summary**: asked, correct, accuracy, avg time, gate status before and after, every miss, 3 slowest correct answers.
+- **End-of-round summary**: asked, correct, accuracy, avg time, gate status before and after (with pooled accuracy), every miss, 3 slowest correct answers.
 - Dark mode via `prefers-color-scheme`.
 
 ## Import / export

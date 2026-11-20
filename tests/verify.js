@@ -286,15 +286,50 @@ test("rounds below minAnswered do not qualify", () => {
   assert.strictEqual(gate.status, "Calibrating");
 });
 
-test("Advance when all 3 rounds >=95% and combined latency <= target", () => {
+test("Advance: pooled >=95%, every round >=90%, combined latency <= target", () => {
+  // pooled = (20 + 19 + 18) / 60 = 95%, one round at 90%
   const rounds = [
-    makeRound({ accuracy: 100, avg_time_ms: 3000 }),
-    makeRound({ accuracy: 96, avg_time_ms: 4000 }),
-    makeRound({ accuracy: 95, avg_time_ms: 4200 })
+    makeRound({ asked: 20, correct: 20, accuracy: 100, avg_time_ms: 3000 }),
+    makeRound({ asked: 20, correct: 19, accuracy: 95, avg_time_ms: 4000 }),
+    makeRound({ asked: 20, correct: 18, accuracy: 90, avg_time_ms: 4200 })
   ];
   // add intermediate target = 4500ms
   const gate = app.computeGate("add", "intermediate", rounds, []);
   assert.strictEqual(gate.status, "Advance");
+  assert.ok(Math.abs(gate.pooledAccuracy - 95) < 1e-9);
+});
+
+test("Hold when pooled accuracy < 95% even though each round >= 90%", () => {
+  // pooled = (19 + 19 + 18) / 60 = 93.3%
+  const rounds = [
+    makeRound({ asked: 20, correct: 19, accuracy: 95 }),
+    makeRound({ asked: 20, correct: 19, accuracy: 95 }),
+    makeRound({ asked: 20, correct: 18, accuracy: 90 })
+  ];
+  const gate = app.computeGate("add", "intermediate", rounds, []);
+  assert.strictEqual(gate.status, "Hold");
+});
+
+test("Hold when pooled >= 95% but one round < 90%", () => {
+  // pooled = (40 + 40 + 17) / 100 = 97%; last round 85% (not Drill, but below 90%)
+  const rounds = [
+    makeRound({ asked: 40, correct: 40, accuracy: 100 }),
+    makeRound({ asked: 40, correct: 40, accuracy: 100 }),
+    makeRound({ asked: 20, correct: 17, accuracy: 85 })
+  ];
+  const gate = app.computeGate("add", "intermediate", rounds, []);
+  assert.ok(gate.pooledAccuracy >= 95);
+  assert.strictEqual(gate.status, "Hold");
+});
+
+test("Drill still checked before Advance", () => {
+  const rounds = [
+    makeRound({ asked: 100, correct: 100, accuracy: 100 }),
+    makeRound({ asked: 100, correct: 100, accuracy: 100 }),
+    makeRound({ asked: 10, correct: 8, accuracy: 80 })
+  ];
+  const gate = app.computeGate("add", "intermediate", rounds, []);
+  assert.strictEqual(gate.status, "Drill");
 });
 
 test("Drill when any round below 85% accuracy", () => {
