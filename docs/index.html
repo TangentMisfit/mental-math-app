@@ -386,39 +386,50 @@ function digitsLE(n) {
   return String(Math.abs(Math.round(n))).split("").reverse().map(Number);
 }
 
-function carryLevelTag(prefix, count) {
-  if (count <= 0) return prefix + ":0";
-  if (count === 1) return prefix + ":1";
-  return prefix + ":2+";
+// Column index -> name. Index 0 is the ones column.
+var COLUMN_NAMES = ["ones", "tens", "hundreds", "thousands", "tenthousands"];
+
+// Positional tag: prefix + ":" + columns that produce a carry/borrow, joined
+// with "+", lowest column first. No carry/borrow -> prefix + ":none".
+function positionalTag(prefix, columns) {
+  if (!columns.length) return prefix + ":none";
+  return prefix + ":" + columns.map(function (c) { return COLUMN_NAMES[c]; }).join("+");
 }
 
-function countAddCarries(a, b) {
+// Columns (0 = ones) whose column sum, including the incoming carry, is >= 10.
+function addCarryColumns(a, b) {
   var da = digitsLE(a), db = digitsLE(b);
   var len = Math.max(da.length, db.length);
-  var carry = 0, count = 0;
+  var carry = 0, cols = [];
   for (var i = 0; i < len; i++) {
     var sum = (da[i] || 0) + (db[i] || 0) + carry;
     carry = sum >= 10 ? 1 : 0;
-    if (carry) count++;
+    if (carry) cols.push(i);
   }
-  return count;
+  return cols;
 }
 
-function countSubBorrows(a, b) {
-  // assumes a >= b
+// Columns where the top digit, after any incoming borrow, is smaller than the
+// bottom digit. Assumes a >= b.
+function subBorrowColumns(a, b) {
   var da = digitsLE(a), db = digitsLE(b);
-  var borrow = 0, count = 0;
+  var borrow = 0, cols = [];
   for (var i = 0; i < da.length; i++) {
     var top = da[i] - borrow;
     var bot = db[i] || 0;
-    if (top < bot) { borrow = 1; count++; } else { borrow = 0; }
+    if (top < bot) { borrow = 1; cols.push(i); } else { borrow = 0; }
   }
-  return count;
+  return cols;
 }
 
-function countMulCarries(a, b) {
-  var da = digitsLE(a), db = digitsLE(b);
-  var count = 0;
+// Columns (absolute position in the answer) where a carry happens in any
+// partial product or in the sum of the partial products. The operand with
+// more digits is the multiplicand, so a×7 and 7×a tag the same.
+function mulCarryColumns(a, b) {
+  var top = a, bottom = b;
+  if (String(b).length > String(a).length) { top = b; bottom = a; }
+  var da = digitsLE(top), db = digitsLE(bottom);
+  var hit = {};
   var partials = [];
   for (var j = 0; j < db.length; j++) {
     var carry = 0;
@@ -427,7 +438,7 @@ function countMulCarries(a, b) {
       var prod = da[i] * db[j] + carry;
       out.push(prod % 10);
       carry = Math.floor(prod / 10);
-      if (carry > 0) count++;
+      if (carry > 0) hit[i + j] = true;
     }
     while (carry > 0) { out.push(carry % 10); carry = Math.floor(carry / 10); }
     partials.push({ digits: out, shift: j });
@@ -444,26 +455,43 @@ function countMulCarries(a, b) {
       if (idx >= 0 && idx < partials[k].digits.length) sum += partials[k].digits[idx];
     }
     addCarry = Math.floor(sum / 10);
-    if (addCarry > 0) count++;
+    if (addCarry > 0) hit[pos] = true;
   }
-  return count;
+  return Object.keys(hit).map(Number).sort(function (x, y) { return x - y; });
 }
 
 function tagsForAdd(a, b) {
-  return [carryLevelTag("carry", countAddCarries(a, b))];
+  return [positionalTag("carry", addCarryColumns(a, b))];
 }
 function tagsForSub(a, b) {
-  return [carryLevelTag("borrow", countSubBorrows(a, b))];
+  return [positionalTag("borrow", subBorrowColumns(a, b))];
 }
 function tagsForMul(a, b) {
   var tags = [];
   var single = a < 10 ? a : (b < 10 ? b : null);
   if (single !== null) tags.push("x" + single);
-  tags.push(carryLevelTag("carry", countMulCarries(a, b)));
+  tags.push(positionalTag("carry", mulCarryColumns(a, b)));
   return tags;
 }
 function tagsForDiv(divisor) {
   return ["div" + divisor];
+}
+
+// Tags for a logged question row. add/sub/mul tags are recomputed from the
+// question text so rows logged under an older tag scheme are counted under
+// the current one. Stored rows are never rewritten.
+var QUESTION_RE = /^\s*(\d+)\s*([+\-×])\s*(\d+)/;
+function tagsForRow(q) {
+  if (q && (q.mode === "add" || q.mode === "sub" || q.mode === "mul")) {
+    var m = QUESTION_RE.exec(String(q.question || ""));
+    if (m) {
+      var a = Number(m[1]), b = Number(m[3]);
+      if (q.mode === "add" && m[2] === "+") return tagsForAdd(a, b);
+      if (q.mode === "sub" && m[2] === "-") return tagsForSub(a, b);
+      if (q.mode === "mul" && m[2] === "×") return tagsForMul(a, b);
+    }
+  }
+  return (q && q.tags) || [];
 }
 
 /* ============================================================
@@ -558,7 +586,7 @@ function computeTagStats(questions) {
   for (var i = 0; i < questions.length; i++) {
     var q = questions[i];
     if (q.skipped) continue;
-    var tags = q.tags || [];
+    var tags = tagsForRow(q);
     for (var t = 0; t < tags.length; t++) {
       var tag = tags[t];
       if (!map[tag]) map[tag] = { attempts: 0, misses: 0, totalLatency: 0 };

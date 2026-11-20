@@ -183,24 +183,40 @@ test("div advanced: divisor 2-19, quotient 5-99", () => {
 
 console.log("Tags: known examples");
 
-test("add carry:0 for 12 + 3", () => {
-  assert.strictEqual(JSON.stringify(app.tagsForAdd(12, 3)), JSON.stringify(["carry:0"]));
-});
-test("add carry:1 for 15 + 8", () => {
-  assert.strictEqual(JSON.stringify(app.tagsForAdd(15, 8)), JSON.stringify(["carry:1"]));
-});
-test("add carry:2+ for 999 + 999", () => {
-  assert.strictEqual(JSON.stringify(app.tagsForAdd(999, 999)), JSON.stringify(["carry:2+"]));
-});
+function tagOf(arr) { return JSON.stringify(arr); }
 
-test("sub borrow:0 for 8 - 3", () => {
-  assert.strictEqual(JSON.stringify(app.tagsForSub(8, 3)), JSON.stringify(["borrow:0"]));
+test("add positional carry: spec examples", () => {
+  assert.strictEqual(tagOf(app.tagsForAdd(174, 463)), tagOf(["carry:tens"]));
+  assert.strictEqual(tagOf(app.tagsForAdd(938, 698)), tagOf(["carry:ones+tens+hundreds"]));
+  assert.strictEqual(tagOf(app.tagsForAdd(757, 151)), tagOf(["carry:tens"]));
 });
-test("sub borrow:1 for 32 - 15", () => {
-  assert.strictEqual(JSON.stringify(app.tagsForSub(32, 15)), JSON.stringify(["borrow:1"]));
+test("add positional carry: none, chained carry counted where it happens", () => {
+  assert.strictEqual(tagOf(app.tagsForAdd(12, 3)), tagOf(["carry:none"]));
+  // 95 + 5: ones 10 -> carry; tens 9+0+1 = 10 -> chained carry in tens
+  assert.strictEqual(tagOf(app.tagsForAdd(95, 5)), tagOf(["carry:ones+tens"]));
+  // 450 + 560: tens 5+6 carry, hundreds 4+5+1 carry
+  assert.strictEqual(tagOf(app.tagsForAdd(450, 560)), tagOf(["carry:tens+hundreds"]));
+  assert.strictEqual(tagOf(app.tagsForAdd(15, 8)), tagOf(["carry:ones"]));
 });
-test("sub borrow:2+ for 300 - 199", () => {
-  assert.strictEqual(JSON.stringify(app.tagsForSub(300, 199)), JSON.stringify(["borrow:2+"]));
+test("sub positional borrow", () => {
+  assert.strictEqual(tagOf(app.tagsForSub(8, 3)), tagOf(["borrow:none"]));
+  assert.strictEqual(tagOf(app.tagsForSub(32, 15)), tagOf(["borrow:ones"]));
+  assert.strictEqual(tagOf(app.tagsForSub(300, 199)), tagOf(["borrow:ones+tens"]));
+  assert.strictEqual(tagOf(app.tagsForSub(512, 371)), tagOf(["borrow:tens"]));
+  // 403 - 197: ones 3<7 borrow; tens 0-1 < 9 borrow; hundreds 4-1 >= 1
+  assert.strictEqual(tagOf(app.tagsForSub(403, 197)), tagOf(["borrow:ones+tens"]));
+});
+test("tagsForRow recomputes add/sub/mul tags from question text, ignoring stored tags", () => {
+  assert.strictEqual(tagOf(app.tagsForRow({ mode: "add", question: "174 + 463 = ?", tags: ["carry:1"] })), tagOf(["carry:tens"]));
+  assert.strictEqual(tagOf(app.tagsForRow({ mode: "sub", question: "32 - 15 = ?", tags: ["borrow:1"] })), tagOf(["borrow:ones"]));
+  assert.strictEqual(tagOf(app.tagsForRow({ mode: "mul", question: "87 × 6 = ?", tags: ["x6", "carry:2+"] })), tagOf(["x6", "carry:ones+tens"]));
+  assert.strictEqual(tagOf(app.tagsForRow({ mode: "div", question: "84 ÷ 7 = ?", tags: ["div7"] })), tagOf(["div7"]));
+});
+test("gate tag stats use recomputed tags, stored rows untouched", () => {
+  const q = { round_id: "rA", mode: "add", question: "174 + 463 = ?", correct: true, skipped: false, latency_ms: 1000, tags: ["carry:1"] };
+  const stats = app.computeTagStats([q]);
+  assert.deepStrictEqual(Array.from(stats.map((t) => t.tag)), ["carry:tens"]);
+  assert.deepStrictEqual(Array.from(q.tags), ["carry:1"]);
 });
 
 test("mul tags single-digit operand tag (x7)", () => {
@@ -211,10 +227,12 @@ test("mul tags no single-digit tag when both multi-digit", () => {
   const tags = app.tagsForMul(23, 45);
   assert.ok(!tags.some((t) => /^x\d+$/.test(t)), "unexpected single-digit tag: " + tags.join(","));
 });
-test("mul carries computed for 23 x 45", () => {
-  // 23*45 = 1035, verify via a carry count sanity check (has at least one carry)
-  const tags = app.tagsForMul(23, 45);
-  assert.ok(tags.some((t) => t.indexOf("carry:") === 0));
+test("mul positional carries across partial products", () => {
+  // 23x5 = 115 carries in ones and tens; 23x4 shifted carries in tens; 115 + 920 carries in hundreds
+  assert.strictEqual(JSON.stringify(app.tagsForMul(23, 45)), JSON.stringify(["carry:ones+tens+hundreds"]));
+  assert.strictEqual(JSON.stringify(app.tagsForMul(87, 6)), JSON.stringify(["x6", "carry:ones+tens"]));
+  assert.strictEqual(JSON.stringify(app.tagsForMul(6, 87)), JSON.stringify(["x6", "carry:ones+tens"]));
+  assert.strictEqual(JSON.stringify(app.tagsForMul(21, 3)), JSON.stringify(["x3", "carry:none"]));
 });
 
 test("div tag matches divisor", () => {

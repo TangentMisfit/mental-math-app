@@ -59,10 +59,13 @@ Match the Python file unless noted. Inclusive ranges, operands drawn independent
 - Question log: `timestamp, round_id, mode, difficulty, question, correct_answer, user_answer, correct, skipped, latency_ms, tags, drill`
 
 ## Tags (computed at generation)
-- add: `carry:0` | `carry:1` | `carry:2+`
-- sub: `borrow:0` | `borrow:1` | `borrow:2+`
-- mul: `x<d>` when one operand is single-digit (e.g. `x7`), plus `carry:0` | `carry:1` | `carry:2+` counted across partial products
+Positional carry/borrow: list the columns that produce a carry (add) or need a borrow (sub), lowest first, joined with `+`, using `ones`, `tens`, `hundreds` (`thousands`, `tenthousands` for mul). None = `carry:none` / `borrow:none`. Work column by column including the incoming carry/borrow; a chained carry counts in the column where it happens.
+- add: e.g. 174+463 → `carry:tens`; 938+698 → `carry:ones+tens+hundreds`; 757+151 → `carry:tens`; 95+5 → `carry:ones+tens`; 12+13 → `carry:none`
+- sub: e.g. 32-15 → `borrow:ones`; 512-371 → `borrow:tens`; 300-199 → `borrow:ones+tens`; 8-3 → `borrow:none`
+- mul: `x<d>` when one operand is single-digit (e.g. `x7`), plus a positional `carry:` tag over absolute answer columns where a carry happens in any partial product or in summing them (multi-digit operand is the multiplicand). e.g. 87×6 → `x6`, `carry:ones+tens`; 23×45 → `carry:ones+tens+hundreds`
 - div: `div<divisor>` (e.g. `div7`)
+- Reachable tags: add intermediate `carry:none|ones|tens|ones+tens`; add advanced all 8 combos of ones/tens/hundreds plus none; sub intermediate `borrow:none|ones|ones+tens` (the last only with 100 as minuend).
+- History: wherever tag stats are computed (gates, weakest tags), add/sub/mul tags are recomputed from the question text, not read from the stored `tags`. Stored rows are never rewritten.
 
 ## Gates (per mode + difficulty)
 Window: last 3 rounds with `drill=false`, `legacy=false`, and >= 10 answered.
