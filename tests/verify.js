@@ -69,13 +69,14 @@ test("add beginner stays in 0-20", () => {
   }, 500);
 });
 
-test("add intermediate stays in 0-100", () => {
+test("add intermediate stays in 0-100 with filler removed", () => {
   repeatCheck(() => {
     const q = app.genAdd("intermediate");
     const [a, b] = q.question.split(" + ").map(Number);
-    assert.ok(a >= 0 && a <= 100);
-    assert.ok(b >= 0 && b <= 100);
-  }, 500);
+    assert.ok(a >= 10 && a <= 100, "a >= 10: " + q.question);
+    assert.ok(b >= 10 && b <= 100, "b >= 10: " + q.question);
+    assert.ok(!(a % 10 === 0 && b % 10 === 0), "both multiples of 10: " + q.question);
+  }, 2000);
 });
 
 test("add advanced stays in 100-999", () => {
@@ -97,13 +98,22 @@ test("sub beginner: a>=b, both 0-20", () => {
   }, 500);
 });
 
-test("sub intermediate: a>=b, both 0-100", () => {
+test("sub intermediate: a>=b, both 0-100, filler removed", () => {
   repeatCheck(() => {
     const q = app.genSub("intermediate");
     const [a, b] = q.question.split(" - ").map(Number);
-    assert.ok(a >= 0 && a <= 100 && b >= 0 && b <= 100);
+    assert.ok(a <= 100 && b >= 10, q.question);
     assert.ok(a >= b);
-  }, 500);
+    assert.ok(b !== 0);
+    assert.ok(!(a % 10 === 0 && b % 10 === 0), "both multiples of 10: " + q.question);
+  }, 2000);
+});
+
+test("beginner and advanced add/sub are not filler-filtered", () => {
+  assert.strictEqual(app.isFiller("add", "beginner", 3, 0), false);
+  assert.strictEqual(app.isFiller("sub", "advanced", 300, 200), false);
+  assert.strictEqual(app.isFiller("add", "intermediate", 30, 40), true);
+  assert.strictEqual(app.isFiller("sub", "intermediate", 45, 7), true);
 });
 
 test("sub advanced: a>=b, both 100-999", () => {

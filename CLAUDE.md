@@ -40,6 +40,7 @@ Match the Python file unless noted. Inclusive ranges, operands drawn independent
 | mul | a, b: 1-12 | a: 10-99, b: 2-9 | a, b: 10-99 |
 | div | divisor 2-12, quotient 2-12 | divisor 3-12, quotient 13-40 (**changed from Python**) | divisor 2-19, quotient 5-99 |
 
+- Intermediate add/sub filler filter (keeps the 0-100 range, after the sub swap): reject when either operand < 10, the second operand is 0, or both operands are multiples of 10. Beginner and advanced are unfiltered.
 - Division: dividend = divisor × quotient, displayed as `dividend ÷ divisor`. Always clean.
 - No repeated question text within a round.
 

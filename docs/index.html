@@ -296,6 +296,14 @@ var SETTINGS = {
     weakTagCount: 2
   },
 
+  // Intermediate add/sub: reject operands < minOperand, second operand 0,
+  // and problems where both operands are multiples of 10.
+  fillerFilter: {
+    add: { intermediate: true },
+    sub: { intermediate: true },
+    minOperand: 10
+  },
+
   uniqueQuestionMaxAttempts: 200,
 
   feedbackDelayMs: 1100,
@@ -461,18 +469,33 @@ function tagsForDiv(divisor) {
 /* ============================================================
    GENERATORS
    ============================================================ */
+function isFiller(mode, difficulty, a, b) {
+  var f = SETTINGS.fillerFilter;
+  if (!f[mode] || !f[mode][difficulty]) return false;
+  if (a < f.minOperand || b < f.minOperand) return true;
+  if (b === 0) return true;
+  if (a % 10 === 0 && b % 10 === 0) return true;
+  return false;
+}
+
 function genAdd(difficulty) {
   var r = SETTINGS.ranges.add[difficulty];
-  var a = randInt(r[0], r[1]);
-  var b = randInt(r[0], r[1]);
+  var a, b;
+  do {
+    a = randInt(r[0], r[1]);
+    b = randInt(r[0], r[1]);
+  } while (isFiller("add", difficulty, a, b));
   return { question: a + " + " + b, answer: a + b, tags: tagsForAdd(a, b) };
 }
 
 function genSub(difficulty) {
   var r = SETTINGS.ranges.sub[difficulty];
-  var a = randInt(r[0], r[1]);
-  var b = randInt(r[0], r[1]);
-  if (b > a) { var t = a; a = b; b = t; }
+  var a, b;
+  do {
+    a = randInt(r[0], r[1]);
+    b = randInt(r[0], r[1]);
+    if (b > a) { var t = a; a = b; b = t; }
+  } while (isFiller("sub", difficulty, a, b));
   return { question: a + " - " + b, answer: a - b, tags: tagsForSub(a, b) };
 }
 
