@@ -476,8 +476,14 @@ function mulCarryColumns(a, b) {
 function tagsForAdd(a, b) {
   return [positionalTag("carry", addCarryColumns(a, b))];
 }
+// Borrow-count tag: number of column borrows in standard right-to-left
+// subtraction. borrow0, borrow1, borrow2, borrow3+.
+function borrowCountTag(a, b) {
+  var n = subBorrowColumns(a, b).length;
+  return n >= 3 ? "borrow3+" : "borrow" + n;
+}
 function tagsForSub(a, b) {
-  return [positionalTag("borrow", subBorrowColumns(a, b))];
+  return [positionalTag("borrow", subBorrowColumns(a, b)), borrowCountTag(a, b)];
 }
 function tagsForMul(a, b) {
   var tags = [];

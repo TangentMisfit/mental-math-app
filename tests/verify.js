@@ -199,16 +199,16 @@ test("add positional carry: none, chained carry counted where it happens", () =>
   assert.strictEqual(tagOf(app.tagsForAdd(15, 8)), tagOf(["carry:ones"]));
 });
 test("sub positional borrow", () => {
-  assert.strictEqual(tagOf(app.tagsForSub(8, 3)), tagOf(["borrow:none"]));
-  assert.strictEqual(tagOf(app.tagsForSub(32, 15)), tagOf(["borrow:ones"]));
-  assert.strictEqual(tagOf(app.tagsForSub(300, 199)), tagOf(["borrow:ones+tens"]));
-  assert.strictEqual(tagOf(app.tagsForSub(512, 371)), tagOf(["borrow:tens"]));
+  assert.strictEqual(tagOf(app.tagsForSub(8, 3)), tagOf(["borrow:none", "borrow0"]));
+  assert.strictEqual(tagOf(app.tagsForSub(32, 15)), tagOf(["borrow:ones", "borrow1"]));
+  assert.strictEqual(tagOf(app.tagsForSub(300, 199)), tagOf(["borrow:ones+tens", "borrow2"]));
+  assert.strictEqual(tagOf(app.tagsForSub(512, 371)), tagOf(["borrow:tens", "borrow1"]));
   // 403 - 197: ones 3<7 borrow; tens 0-1 < 9 borrow; hundreds 4-1 >= 1
-  assert.strictEqual(tagOf(app.tagsForSub(403, 197)), tagOf(["borrow:ones+tens"]));
+  assert.strictEqual(tagOf(app.tagsForSub(403, 197)), tagOf(["borrow:ones+tens", "borrow2"]));
 });
 test("tagsForRow recomputes add/sub/mul tags from question text, ignoring stored tags", () => {
   assert.strictEqual(tagOf(app.tagsForRow({ mode: "add", question: "174 + 463 = ?", tags: ["carry:1"] })), tagOf(["carry:tens"]));
-  assert.strictEqual(tagOf(app.tagsForRow({ mode: "sub", question: "32 - 15 = ?", tags: ["borrow:1"] })), tagOf(["borrow:ones"]));
+  assert.strictEqual(tagOf(app.tagsForRow({ mode: "sub", question: "32 - 15 = ?", tags: ["borrow:1"] })), tagOf(["borrow:ones", "borrow1"]));
   assert.strictEqual(tagOf(app.tagsForRow({ mode: "mul", question: "87 × 6 = ?", tags: ["x6", "carry:2+"] })), tagOf(["x6", "carry:ones+tens"]));
   assert.strictEqual(tagOf(app.tagsForRow({ mode: "div", question: "84 ÷ 7 = ?", tags: ["div7"] })), tagOf(["div7"]));
 });
