@@ -280,7 +280,7 @@
    SETTINGS — every tunable value lives here
    ============================================================ */
 var SETTINGS = {
-  appVersion: "v1.1",
+  appVersion: "v1.1.1",
   roundSeconds: 300,
   modes: ["add", "sub", "mul", "div"],
   comingSoonModes: ["pct", "scale", "mixed", "ratios"],
@@ -1044,6 +1044,35 @@ function triggerDownload(filename, text) {
 }
 
 /* ============================================================
+   DUPLICATE CHECK (read-only)
+   ============================================================ */
+// Likely double-submit duplicates: same round_id, question text, and user
+// answer, logged within dupWindowMs of an earlier matching row. Counts the
+// extra rows only. Never modifies stored data.
+// Console: findLikelyDuplicates(getQuestions())
+function findLikelyDuplicates(questions, dupWindowMs) {
+  var windowMs = dupWindowMs == null ? 2000 : dupWindowMs;
+  var lastSeen = {};
+  var dups = [];
+  var byModeDifficulty = {};
+  var sorted = questions.slice().sort(function (a, b) { return new Date(a.timestamp) - new Date(b.timestamp); });
+  for (var i = 0; i < sorted.length; i++) {
+    var q = sorted[i];
+    var t = new Date(q.timestamp).getTime();
+    if (isNaN(t)) continue;
+    var key = q.round_id + "|" + q.question + "|" + q.user_answer;
+    var prev = lastSeen[key];
+    if (prev != null && t - prev <= windowMs) {
+      dups.push(q);
+      var md = q.mode + "/" + q.difficulty;
+      byModeDifficulty[md] = (byModeDifficulty[md] || 0) + 1;
+    }
+    lastSeen[key] = t;
+  }
+  return { total: dups.length, byModeDifficulty: byModeDifficulty, rows: dups };
+}
+
+/* ============================================================
    ID / TIME HELPERS
    ============================================================ */
 function makeRoundId() {
@@ -1285,6 +1314,7 @@ function startRound(mode, difficulty, drill) {
     answerBuffer: "",
     step: 1,
     step1Answer: "",
+    answered: false,
     gateBefore: gateBefore,
     drillWeights: drillWeights,
     timerHandle: null,
@@ -1348,6 +1378,7 @@ function nextQuestion() {
   round.step = 1;
   round.step1Answer = "";
   round.questionStartedAt = Date.now();
+  setAnswerLock(false);
 
   var hintEl = $("question-hint");
   var stepEl = $("question-step");
@@ -1391,8 +1422,17 @@ function renderKeypad() {
   }
 }
 
+// Per-question answered lock. Set when the final answer (or a skip) is
+// accepted; cleared only when the next question is displayed. While set,
+// every submit, skip, and keypad press is ignored, and Submit/Skip are disabled.
+function setAnswerLock(locked) {
+  round.answered = locked;
+  $("btn-submit").disabled = locked;
+  $("btn-skip").disabled = locked;
+}
+
 function onKeypadPress(key) {
-  if (!round || round.ended) return;
+  if (!round || round.ended || round.answered) return;
   if (key === "⌫") {
     round.answerBuffer = round.answerBuffer.slice(0, -1);
   } else if (key === ".") {
@@ -1409,7 +1449,7 @@ function answerMatches(buffer, expected) {
 }
 
 function submitAnswer() {
-  if (!round || round.ended) return;
+  if (!round || round.ended || round.answered) return;
   if (round.answerBuffer === "") return; // empty submit does nothing
   var s = round.current.scaffold;
 
@@ -1441,6 +1481,7 @@ function submitAnswer() {
     entry.step1_expected = s.step1;
     entry.step2_answer = round.answerBuffer;
   }
+  setAnswerLock(true);
   logQuestion(entry);
 
   var fb = $("feedback");
@@ -1452,14 +1493,15 @@ function submitAnswer() {
     fb.className = "feedback incorrect";
   }
 
+  var thisRound = round;
   setTimeout(function () {
-    if (!round || round.ended) return;
+    if (round !== thisRound || round.ended) return;
     nextQuestion();
   }, SETTINGS.feedbackDelayMs);
 }
 
 function skipQuestion() {
-  if (!round || round.ended) return;
+  if (!round || round.ended || round.answered) return;
   var s = round.current.scaffold;
   var entry = {
     question: round.current.question + " = ?",

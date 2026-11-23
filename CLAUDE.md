@@ -49,6 +49,8 @@ Match the Python file unless noted. Inclusive ranges, operands drawn independent
 - 300 seconds, visible countdown, ends at 0 even mid-question.
 - Skip: logged with `skipped=true`; excluded from asked, correct, and latency. Does not end the round.
 - Empty submit does nothing.
+- Answered lock: once a question's final answer is accepted, every further submit, skip, and keypad press is ignored until the next question is displayed; Submit and Skip are disabled during the feedback pause. Applies to normal, drill, and all Sub Lab rounds (scaffold step 1 clears the input and moves to step 2; the lock applies at step 2). A round ending during the pause never logs the question again, and a pending feedback timer never advances a different round.
+- Duplicate check (read-only): `findLikelyDuplicates(questions)` flags rows with the same round_id, question, and user answer within 2 s of an earlier match. `node tests/dup_check.js <questions.csv>` reports counts per mode/difficulty. Never modifies stored data.
 
 ## Levels
 - All four modes start at intermediate. Beginner shows as complete but stays playable.
