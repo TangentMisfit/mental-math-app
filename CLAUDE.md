@@ -19,6 +19,7 @@ Mental math practice app: the original Python terminal game plus a mobile PWA po
 - Repo is public: no personal data, names, or real progress numbers in code, tests, fixtures, or commits.
 - When a spec decision changes, update this file in the same commit as the code.
 - All localStorage keys use the `mma_` prefix. Never write unprefixed keys.
+- Displayed app version lives in `SETTINGS.appVersion`. Bump it (and `CACHE_VERSION`) on user-visible changes.
 
 ## Commands
 - Local preview: `python -m http.server 8000 -d docs` then open http://localhost:8000
@@ -55,9 +56,12 @@ Match the Python file unless noted. Inclusive ranges, operands drawn independent
 - Advanced unlock is sticky: once a mode's intermediate gate returns Advance, advanced stays unlocked even if later rounds drop the gate.
 
 ## Data (localStorage)
-- Round log: `timestamp, mode, difficulty, round_seconds, asked, correct, accuracy, avg_time_ms, round_id, drill, legacy, stage`
-- Question log: `timestamp, round_id, mode, difficulty, question, correct_answer, user_answer, correct, skipped, latency_ms, tags, drill, len_mismatch`
+- Round log: `timestamp, mode, difficulty, round_seconds, asked, correct, accuracy, avg_time_ms, round_id, drill, legacy, stage, sublab`
+- Question log: `timestamp, round_id, mode, difficulty, question, correct_answer, user_answer, correct, skipped, latency_ms, tags, drill, len_mismatch, sublab, step1_answer, step1_expected, step2_answer`
 - `len_mismatch`: true when the answer is wrong AND the user's answer has a different digit count than the correct answer (likely typo). Always false for skipped rows. Scoring unchanged: still a wrong answer. Rows logged before this column existed have it computed on export.
+- `sublab`: true for Sub Lab rounds/questions. Missing on older rows; exported as `false`.
+- `step1_answer`, `step1_expected`, `step2_answer`: Sub Lab scaffold questions only; blank otherwise.
+- New columns are always appended at the end of the CSV so older column positions never move.
 
 ## Tags (computed at generation)
 Positional carry/borrow: list the columns that produce a carry (add) or need a borrow (sub), lowest first, joined with `+`, using `ones`, `tens`, `hundreds` (`thousands`, `tenthousands` for mul). None = `carry:none` / `borrow:none`. Work column by column including the incoming carry/borrow; a chained carry counts in the column where it happens.
@@ -100,6 +104,27 @@ Weakest tags: rank by miss rate, tiebreak by avg latency, minimum 3 attempts.
 - **End-of-round summary**: asked, correct, accuracy, avg time, gate status before and after (with pooled accuracy), every miss, 3 slowest correct answers.
 - Dark mode via `prefers-color-scheme`.
 
+## Sub Lab (v1.x)
+Practice-only subtraction sub-skill drills, opened from the Sub Lab button on the Subtraction card. Purpose: reduce working-memory load in 3-digit subtraction by drilling rounding the subtrahend and adjusting.
+
+- Logged to the normal round and question logs with mode `sublab`, difficulty = drill id, `sublab=true`, `drill=false`. Full per-question data, so it appears in CSV export.
+- **Excluded from every gate window and Today's plan**, like legacy rows: `getQualifyingRounds` rejects `sublab` rows (and mode `sublab` is not in `SETTINGS.modes`, so no gate, unlock, dashboard card, or plan entry is ever computed for it). Drill weights also skip `sublab` questions.
+- Same 300 s round, timer, skip, and empty-submit behavior as normal rounds. No repeated question text within a round.
+- Sub Lab screen: one card per drill with last round's accuracy and avg latency, plus the flash duration setting.
+- Results: asked, correct, accuracy, avg latency vs the display-only speed reference, worst tag by miss rate (min 3 attempts), misses, 3 slowest. No gate status.
+- Speed references are display only, never used by a gate.
+
+| id | Generator | Tags | Speed ref |
+|---|---|---|---|
+| `complement` | 50/50: `100 - n`, n 11-99; or `1000 - n`, n 101-999. Multiples of 10 excluded. | `comp100` / `comp1000` | 2500 ms comp100, 4000 ms comp1000 |
+| `scaffold` | a 400-999, b 101..(a-50), b not a multiple of 10. Two inputs (see below). | `round_hundred` or `round_ten`, plus borrow-count tag of `a - r` | none |
+| `nearround` | a 300-999, b 100-999, distance from b up to the next hundred above it is 1-30 (b mod 100 in 70-99), a - b >= 10. Single input. | borrow-count tag of `a - b`, `near_hundred` | 7000 ms |
+| `flash` | sub/advanced generator. Problem visible for the flash duration, then shown as `? - ? = ?`; input stays live; latency from first display. Duration 1500/2000/3000 ms, default 2000, stored in `mma_flash_ms`. | borrow-count tag of `a - b`, `flash` | none |
+
+Scaffold rounding rule: r = next hundred above b if (r - b) <= 30, else r = next ten above b. adj = r - b.
+- Screen: `a - b` at top the whole question, hint `Round b up to r`. Input 1: `a - r = ?`. Input 2: `+ adj = ?` (adj shown). Final answer = a - b.
+- Correct only if both inputs are correct. Latency = display to second submit. `question` = `a - b = ?`, `user_answer` = `step2_answer` = second input, `step1_answer` = first input, `step1_expected` = a - r. A skip records whatever step 1 had.
+
 ## Import / export
 - **Import CSV** (legacy `progress.csv`):
   - `mult-beginner` with difficulty `n/a` maps to `mul` / `beginner`
@@ -108,7 +133,9 @@ Weakest tags: rank by miss rate, tiebreak by avg latency, minimum 3 attempts.
   - Dedupe on `timestamp + mode + difficulty`
   - Set `legacy=true`: visible in history, never counts toward gates
 - **Export**: two separate buttons, Export rounds.csv and Export questions.csv, each triggering exactly one download (Android Chrome blocks back-to-back downloads).
-  - questions.csv columns, in order: `timestamp, round_id, mode, difficulty, question, correct_answer, user_answer, correct, skipped, latency_ms, tags, drill, len_mismatch` (tags joined with `|`, as stored).
+  - rounds.csv columns, in order: `timestamp, mode, difficulty, round_seconds, asked, correct, accuracy, avg_time_ms, round_id, drill, legacy, stage, sublab`.
+  - questions.csv columns, in order: `timestamp, round_id, mode, difficulty, question, correct_answer, user_answer, correct, skipped, latency_ms, tags, drill, len_mismatch, sublab, step1_answer, step1_expected, step2_answer` (tags joined with `|`, as stored).
+  - Any new column is appended at the end.
 
 ## Known Python bugs (reference only; do not fix the .py)
 - Empty input ends the round.

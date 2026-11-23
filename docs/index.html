@@ -109,6 +109,11 @@
 
   .question-box { text-align: center; padding: 30px 10px 18px; }
   .question-text { font-size: 34px; font-weight: 700; letter-spacing: 0.5px; }
+  .question-hint { font-size: 14px; color: var(--text-dim); margin-top: 8px; }
+  .question-step { font-size: 22px; font-weight: 600; margin-top: 10px; font-variant-numeric: tabular-nums; }
+  .question-step .done { color: var(--text-dim); font-size: 17px; }
+  .app-version { font-size: 11px; font-weight: 500; color: var(--text-dim); margin-left: 4px; }
+  .opt-btn.selected { background: var(--accent); color: var(--accent-text); }
   .answer-display {
     min-height: 44px; font-size: 28px; text-align: center; margin: 6px 0 18px;
     border-bottom: 2px solid var(--border); padding-bottom: 6px; font-variant-numeric: tabular-nums;
@@ -149,7 +154,7 @@
 <body>
 <div id="app">
   <header class="top">
-    <h1>Mental Math</h1>
+    <h1>Mental Math<span class="app-version" id="app-version"></span></h1>
     <div class="btn-row">
       <button class="nav-btn" data-nav="home">Home</button>
       <button class="nav-btn" data-nav="history">History</button>
@@ -194,6 +199,8 @@
       <div class="question-box">
         <div class="muted" id="round-label">add · intermediate</div>
         <div class="question-text" id="question-text">? + ? = ?</div>
+        <div class="question-hint" id="question-hint" style="display:none;"></div>
+        <div class="question-step" id="question-step" style="display:none;"></div>
       </div>
       <div class="answer-display" id="answer-display">&nbsp;</div>
       <div class="feedback" id="feedback"></div>
@@ -213,11 +220,18 @@
           <div class="stat">Accuracy<b id="sum-accuracy">0%</b></div>
           <div class="stat">Avg time<b id="sum-avg">0ms</b></div>
         </div>
-        <div class="row">
-          <div class="muted">Gate before: <span id="sum-gate-before">-</span></div>
+        <div id="sum-gate-block">
+          <div class="row">
+            <div class="muted">Gate before: <span id="sum-gate-before">-</span></div>
+          </div>
+          <div class="row">
+            <div class="muted">Gate after: <span id="sum-gate-after">-</span></div>
+          </div>
         </div>
-        <div class="row">
-          <div class="muted">Gate after: <span id="sum-gate-after">-</span></div>
+        <div id="sum-sublab-block" style="display:none;">
+          <div class="muted" id="sum-speed-ref">-</div>
+          <div class="muted">Worst tag: <span id="sum-worst-tag">-</span></div>
+          <div class="muted">Practice only: not counted toward gates.</div>
         </div>
       </div>
       <div class="card">
@@ -229,6 +243,19 @@
         <div id="sum-slowest"><div class="muted">None</div></div>
       </div>
       <button class="action" id="btn-summary-home">Back to home</button>
+    </section>
+
+    <section id="view-sublab" class="view">
+      <div class="card">
+        <h2>Sub Lab</h2>
+        <div class="muted">Sub-skill drills for subtraction. Practice only: never counted toward gates or Today's plan.</div>
+      </div>
+      <div id="sublab-drills"></div>
+      <div class="card">
+        <h2>Flash duration</h2>
+        <div class="btn-row" id="flash-options"></div>
+      </div>
+      <button class="action secondary" id="btn-sublab-home">Back to home</button>
     </section>
 
     <section id="view-history" class="view">
@@ -253,6 +280,7 @@
    SETTINGS — every tunable value lives here
    ============================================================ */
 var SETTINGS = {
+  appVersion: "v1.1",
   roundSeconds: 300,
   modes: ["add", "sub", "mul", "div"],
   comingSoonModes: ["pct", "scale", "mixed", "ratios"],
@@ -321,13 +349,41 @@ var SETTINGS = {
 
   feedbackDelayMs: 1100,
 
+  // Sub Lab: practice-only subtraction drills. Logged as mode "sublab",
+  // difficulty = drill id, sublab=true. Never enters gates or Today's plan.
+  subLab: {
+    drills: ["complement", "scaffold", "nearround", "flash"],
+    drillLabels: {
+      complement: "Complements",
+      scaffold: "Round and adjust",
+      nearround: "Near-hundred subtrahend",
+      flash: "Flash"
+    },
+    drillDescriptions: {
+      complement: "100 - n and 1000 - n",
+      scaffold: "Two steps: a - r, then + adjustment",
+      nearround: "a - b where b is 1-30 below a hundred",
+      flash: "3-digit a - b, operands hidden after a moment"
+    },
+    complement: { n100: [11, 99], n1000: [101, 999] }, // multiples of 10 excluded
+    scaffold: { a: [400, 999], bMin: 101, bGapBelowA: 50, maxHundredGap: 30 },
+    nearround: { a: [300, 999], b: [100, 999], maxDistToHundred: 30, minDiff: 10 },
+    flash: { difficulty: "advanced", optionsMs: [1500, 2000, 3000], defaultMs: 2000 },
+    // Display-only speed references (ms); never used by any gate.
+    speedRefMs: {
+      complement: { comp100: 2500, comp1000: 4000 },
+      nearround: { all: 7000 }
+    }
+  },
+
   storageKeys: {
     rounds: "mma_rounds",
     questions: "mma_questions",
-    unlocked: "mma_unlocked"
+    unlocked: "mma_unlocked",
+    flashMs: "mma_flash_ms"
   },
 
-  modeLabels: { add: "Addition", sub: "Subtraction", mul: "Multiplication", div: "Division" },
+  modeLabels: { add: "Addition", sub: "Subtraction", mul: "Multiplication", div: "Division", sublab: "Sub Lab" },
   soonLabels: { pct: "Percentages", scale: "Scale", mixed: "Mixed", ratios: "Ratios" }
 };
 
@@ -561,7 +617,74 @@ function genDiv(difficulty) {
   return { question: dividend + " ÷ " + divisor, answer: quotient, tags: tagsForDiv(divisor) };
 }
 
-var GENERATORS = { add: genAdd, sub: genSub, mul: genMul, div: genDiv };
+/* ---------- Sub Lab generators ---------- */
+function randIntNotMultipleOf10(range) {
+  var n;
+  do { n = randInt(range[0], range[1]); } while (n % 10 === 0);
+  return n;
+}
+
+function genComplement() {
+  var c = SETTINGS.subLab.complement;
+  var big = Math.random() < 0.5;
+  var base = big ? 1000 : 100;
+  var n = randIntNotMultipleOf10(big ? c.n1000 : c.n100);
+  return { question: base + " - " + n, answer: base - n, tags: [big ? "comp1000" : "comp100"] };
+}
+
+// Round b up: next hundred above b if that is within maxHundredGap, else the
+// next ten above b. Returns { r, adj, kind }.
+function scaffoldRounding(b) {
+  var hundred = Math.floor(b / 100) * 100 + 100;
+  if (hundred - b <= SETTINGS.subLab.scaffold.maxHundredGap) {
+    return { r: hundred, adj: hundred - b, kind: "round_hundred" };
+  }
+  var ten = Math.floor(b / 10) * 10 + 10;
+  return { r: ten, adj: ten - b, kind: "round_ten" };
+}
+
+function genScaffold() {
+  var s = SETTINGS.subLab.scaffold;
+  var a = randInt(s.a[0], s.a[1]);
+  var b = randIntNotMultipleOf10([s.bMin, a - s.bGapBelowA]);
+  var rnd = scaffoldRounding(b);
+  return {
+    question: a + " - " + b,
+    answer: a - b,
+    tags: [rnd.kind, borrowCountTag(a, rnd.r)],
+    scaffold: { a: a, b: b, r: rnd.r, adj: rnd.adj, step1: a - rnd.r }
+  };
+}
+
+// Distance from b up to the next hundred above it (1..100).
+function distToNextHundred(b) {
+  return Math.floor(b / 100) * 100 + 100 - b;
+}
+
+function genNearRound() {
+  var s = SETTINGS.subLab.nearround;
+  var a, b, d;
+  do {
+    a = randInt(s.a[0], s.a[1]);
+    b = randInt(s.b[0], s.b[1]);
+    d = distToNextHundred(b);
+  } while (d < 1 || d > s.maxDistToHundred || a - b < s.minDiff);
+  return { question: a + " - " + b, answer: a - b, tags: [borrowCountTag(a, b), "near_hundred"] };
+}
+
+function genFlash() {
+  var q = genSub(SETTINGS.subLab.flash.difficulty);
+  var m = QUESTION_RE.exec(q.question);
+  return { question: q.question, answer: q.answer, tags: [borrowCountTag(Number(m[1]), Number(m[3])), "flash"] };
+}
+
+var SUBLAB_GENERATORS = { complement: genComplement, scaffold: genScaffold, nearround: genNearRound, flash: genFlash };
+
+function genSubLab(drillId) {
+  return SUBLAB_GENERATORS[drillId]();
+}
+
+var GENERATORS = { add: genAdd, sub: genSub, mul: genMul, div: genDiv, sublab: genSubLab };
 
 function generate(mode, difficulty) {
   return GENERATORS[mode](difficulty);
@@ -613,7 +736,7 @@ function tagUniverse(mode, difficulty) {
 function drillTagWeights(mode, difficulty, questions, universe) {
   var d = SETTINGS.drill;
   var hist = questions.filter(function (q) {
-    return q.mode === mode && q.difficulty === difficulty && !q.legacy && !q.skipped;
+    return q.mode === mode && q.difficulty === difficulty && !q.legacy && !q.sublab && !q.skipped;
   }).slice(-d.historyQuestions);
   var stats = {};
   for (var i = 0; i < hist.length; i++) {
@@ -663,11 +786,13 @@ function lenMismatch(correct, userAnswer, correctAnswer) {
 /* ============================================================
    TAG STATS / GATES
    ============================================================ */
+// Gate window. Sub Lab rounds are practice only: excluded by the sublab flag
+// (and by mode, since "sublab" is not in SETTINGS.modes), like legacy rows.
 function getQualifyingRounds(rounds, mode, difficulty) {
   return rounds
     .filter(function (r) {
       return r.mode === mode && r.difficulty === difficulty &&
-        !r.drill && !r.legacy && r.asked >= SETTINGS.gate.minAnswered;
+        !r.drill && !r.legacy && !r.sublab && r.asked >= SETTINGS.gate.minAnswered;
     })
     .sort(function (a, b) { return new Date(b.timestamp) - new Date(a.timestamp); })
     .slice(0, SETTINGS.gate.windowSize);
@@ -791,17 +916,23 @@ function csvEscape(val) {
 }
 
 function roundsToCSV(rounds) {
-  var header = ["timestamp", "mode", "difficulty", "round_seconds", "asked", "correct", "accuracy", "avg_time_ms", "round_id", "drill", "legacy", "stage"];
+  // New columns are appended at the end to stay backward compatible.
+  var header = ["timestamp", "mode", "difficulty", "round_seconds", "asked", "correct", "accuracy", "avg_time_ms", "round_id", "drill", "legacy", "stage", "sublab"];
   var lines = [header.join(",")];
   for (var i = 0; i < rounds.length; i++) {
     var r = rounds[i];
-    lines.push(header.map(function (k) { return csvEscape(r[k]); }).join(","));
+    lines.push(header.map(function (k) {
+      return csvEscape(k === "sublab" ? !!r.sublab : r[k]);
+    }).join(","));
   }
   return lines.join("\n");
 }
 
 function questionsToCSV(questions) {
-  var header = ["timestamp", "round_id", "mode", "difficulty", "question", "correct_answer", "user_answer", "correct", "skipped", "latency_ms", "tags", "drill", "len_mismatch"];
+  // New columns are appended at the end to stay backward compatible.
+  // step1_* / step2_answer are filled only for Sub Lab scaffold questions.
+  var header = ["timestamp", "round_id", "mode", "difficulty", "question", "correct_answer", "user_answer", "correct", "skipped", "latency_ms", "tags", "drill", "len_mismatch",
+    "sublab", "step1_answer", "step1_expected", "step2_answer"];
   var lines = [header.join(",")];
   for (var i = 0; i < questions.length; i++) {
     var q = questions[i];
@@ -809,6 +940,7 @@ function questionsToCSV(questions) {
       var v = q[k];
       if (k === "tags") v = (v || []).join("|");
       if (k === "len_mismatch" && v == null) v = !q.skipped && lenMismatch(q.correct, q.user_answer, q.correct_answer);
+      if (k === "sublab") v = !!v;
       return csvEscape(v);
     }).join(","));
   }
@@ -997,6 +1129,7 @@ function renderDashboard() {
         '<button class="action" data-play="' + mode + '|' + level + '">Practice ' + level + '</button>' +
       '</div>' +
       (advancedLocked ? '<div class="muted" style="margin-top:6px;">Advanced locked until intermediate reaches Advance.</div>' : '') +
+      (mode === "sub" ? '<div class="btn-row" style="margin-top:8px;"><button class="action secondary" data-open-sublab="1">Sub Lab</button></div>' : '') +
       (gate.status === "Drill" ? '<div class="btn-row" style="margin-top:8px;"><button class="action warn" data-drill="' + mode + '|' + level + '">Weak-spot round</button></div>' : '');
 
     container.appendChild(card);
@@ -1031,6 +1164,70 @@ function bindDashboardActions() {
       startRound(parts[0], parts[1], true);
     };
   }
+  var labBtns = document.querySelectorAll("[data-open-sublab]");
+  for (var k = 0; k < labBtns.length; k++) {
+    labBtns[k].onclick = function () { renderSubLab(); showView("sublab"); };
+  }
+}
+
+/* ============================================================
+   SUB LAB SCREEN
+   ============================================================ */
+function getFlashMs() {
+  var f = SETTINGS.subLab.flash;
+  var v = Number(readJSON(SETTINGS.storageKeys.flashMs, f.defaultMs));
+  return f.optionsMs.indexOf(v) === -1 ? f.defaultMs : v;
+}
+function setFlashMs(ms) {
+  writeJSON(SETTINGS.storageKeys.flashMs, ms);
+}
+
+// Most recent Sub Lab round for a drill, or null.
+function lastSubLabRound(rounds, drillId) {
+  var last = null;
+  for (var i = 0; i < rounds.length; i++) {
+    var r = rounds[i];
+    if (r.mode !== "sublab" || r.difficulty !== drillId) continue;
+    if (!last || new Date(r.timestamp) >= new Date(last.timestamp)) last = r;
+  }
+  return last;
+}
+
+function renderSubLab() {
+  var lab = SETTINGS.subLab;
+  var rounds = getRounds();
+  var container = $("sublab-drills");
+  container.innerHTML = "";
+  for (var i = 0; i < lab.drills.length; i++) {
+    var id = lab.drills[i];
+    var last = lastSubLabRound(rounds, id);
+    var card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML =
+      '<div class="row"><h2>' + lab.drillLabels[id] + '</h2></div>' +
+      '<div class="muted">' + lab.drillDescriptions[id] + '</div>' +
+      '<div class="stats-line">' +
+        '<div class="stat">Last accuracy<b>' + (last ? fmtPct(last.accuracy) : "-") + '</b></div>' +
+        '<div class="stat">Last avg time<b>' + (last ? fmtMs(last.avg_time_ms) : "-") + '</b></div>' +
+      '</div>' +
+      '<div class="btn-row"><button class="action" data-sublab="' + id + '">Start</button></div>';
+    container.appendChild(card);
+  }
+  var startBtns = document.querySelectorAll("[data-sublab]");
+  for (var j = 0; j < startBtns.length; j++) {
+    startBtns[j].onclick = function () { startRound("sublab", this.getAttribute("data-sublab"), false); };
+  }
+
+  var current = getFlashMs();
+  var opts = $("flash-options");
+  opts.innerHTML = "";
+  lab.flash.optionsMs.forEach(function (ms) {
+    var b = document.createElement("button");
+    b.className = "action secondary opt-btn" + (ms === current ? " selected" : "");
+    b.textContent = ms + " ms";
+    b.onclick = function () { setFlashMs(ms); renderSubLab(); };
+    opts.appendChild(b);
+  });
 }
 
 function buildTodaysPlan() {
@@ -1066,13 +1263,18 @@ function buildTodaysPlan() {
 function startRound(mode, difficulty, drill) {
   var rounds = getRounds();
   var questions = getQuestions();
-  var gateBefore = computeGate(mode, difficulty, rounds, questions);
+  var sublab = mode === "sublab";
+  // Sub Lab is practice only: no gate before/after.
+  var gateBefore = sublab ? null : computeGate(mode, difficulty, rounds, questions);
   var drillWeights = drill ? drillTagWeights(mode, difficulty, questions) : [];
 
   round = {
     mode: mode,
     difficulty: difficulty,
     drill: !!drill,
+    sublab: sublab,
+    flashMs: sublab && difficulty === "flash" ? getFlashMs() : 0,
+    flashHandle: null,
     roundId: makeRoundId(),
     startedAt: Date.now(),
     endsAt: Date.now() + SETTINGS.roundSeconds * 1000,
@@ -1081,13 +1283,16 @@ function startRound(mode, difficulty, drill) {
     current: null,
     questionStartedAt: 0,
     answerBuffer: "",
+    step: 1,
+    step1Answer: "",
     gateBefore: gateBefore,
     drillWeights: drillWeights,
     timerHandle: null,
     ended: false
   };
 
-  $("round-label").textContent = SETTINGS.modeLabels[mode] + " · " + difficulty + (drill ? " · drill" : "");
+  $("round-label").textContent = SETTINGS.modeLabels[mode] + " · " +
+    (sublab ? SETTINGS.subLab.drillLabels[difficulty] : difficulty) + (drill ? " · drill" : "");
   showView("round");
   nextQuestion();
   round.timerHandle = setInterval(tickTimer, 100);
@@ -1117,12 +1322,55 @@ function pickNextQuestion() {
   return cand;
 }
 
+function clearFlash() {
+  if (round && round.flashHandle) {
+    clearTimeout(round.flashHandle);
+    round.flashHandle = null;
+  }
+}
+
+function renderScaffoldStep() {
+  var s = round.current.scaffold;
+  var stepEl = $("question-step");
+  if (round.step === 1) {
+    stepEl.innerHTML = s.a + " - " + s.r + " = ?";
+  } else {
+    stepEl.innerHTML = '<div class="done">' + s.a + " - " + s.r + " = " + round.step1Answer + '</div>' +
+      "<div>+ " + s.adj + " = ?</div>";
+  }
+}
+
 function nextQuestion() {
   if (!round || round.ended) return;
+  clearFlash();
   round.current = pickNextQuestion();
   round.answerBuffer = "";
+  round.step = 1;
+  round.step1Answer = "";
   round.questionStartedAt = Date.now();
-  $("question-text").textContent = round.current.question + " = ?";
+
+  var hintEl = $("question-hint");
+  var stepEl = $("question-step");
+  var s = round.current.scaffold;
+  if (s) {
+    $("question-text").textContent = round.current.question;
+    hintEl.textContent = "Round " + s.b + " up to " + s.r;
+    hintEl.style.display = "block";
+    stepEl.style.display = "block";
+    renderScaffoldStep();
+  } else {
+    $("question-text").textContent = round.current.question + " = ?";
+    hintEl.style.display = "none";
+    stepEl.style.display = "none";
+  }
+  if (round.flashMs) {
+    var shown = round.current;
+    round.flashHandle = setTimeout(function () {
+      if (!round || round.ended || round.current !== shown) return;
+      $("question-text").textContent = "? - ? = ?";
+    }, round.flashMs);
+  }
+
   $("answer-display").innerHTML = "&nbsp;";
   $("feedback").textContent = "";
   $("feedback").className = "feedback";
@@ -1155,14 +1403,29 @@ function onKeypadPress(key) {
   $("answer-display").textContent = round.answerBuffer || " ";
 }
 
+function answerMatches(buffer, expected) {
+  var v = parseFloat(buffer);
+  return !isNaN(v) && Math.abs(v - expected) < 1e-9;
+}
+
 function submitAnswer() {
   if (!round || round.ended) return;
   if (round.answerBuffer === "") return; // empty submit does nothing
-  var latency = Date.now() - round.questionStartedAt;
-  var userVal = parseFloat(round.answerBuffer);
-  var correct = !isNaN(userVal) && Math.abs(userVal - round.current.answer) < 1e-9;
+  var s = round.current.scaffold;
 
-  logQuestion({
+  // Scaffold step 1: record and move on to step 2, no feedback yet.
+  if (s && round.step === 1) {
+    round.step1Answer = round.answerBuffer;
+    round.step = 2;
+    round.answerBuffer = "";
+    $("answer-display").innerHTML = "&nbsp;";
+    renderScaffoldStep();
+    return;
+  }
+
+  var latency = Date.now() - round.questionStartedAt;
+  var correct = answerMatches(round.answerBuffer, round.current.answer);
+  var entry = {
     question: round.current.question + " = ?",
     correct_answer: round.current.answer,
     user_answer: round.answerBuffer,
@@ -1170,14 +1433,22 @@ function submitAnswer() {
     skipped: false,
     latency_ms: latency,
     tags: round.current.tags
-  });
+  };
+  if (s) {
+    // Correct only if both steps are correct.
+    entry.correct = correct && answerMatches(round.step1Answer, s.step1);
+    entry.step1_answer = round.step1Answer;
+    entry.step1_expected = s.step1;
+    entry.step2_answer = round.answerBuffer;
+  }
+  logQuestion(entry);
 
   var fb = $("feedback");
-  if (correct) {
+  if (entry.correct) {
     fb.textContent = "Correct · " + latency + "ms";
     fb.className = "feedback correct";
   } else {
-    fb.textContent = "Wrong · answer " + round.current.answer + " · " + latency + "ms";
+    fb.textContent = "Wrong · answer " + (s ? s.step1 + " then " : "") + round.current.answer + " · " + latency + "ms";
     fb.className = "feedback incorrect";
   }
 
@@ -1189,7 +1460,8 @@ function submitAnswer() {
 
 function skipQuestion() {
   if (!round || round.ended) return;
-  logQuestion({
+  var s = round.current.scaffold;
+  var entry = {
     question: round.current.question + " = ?",
     correct_answer: round.current.answer,
     user_answer: "",
@@ -1197,7 +1469,13 @@ function skipQuestion() {
     skipped: true,
     latency_ms: null,
     tags: round.current.tags
-  });
+  };
+  if (s) {
+    entry.step1_answer = round.step1Answer;
+    entry.step1_expected = s.step1;
+    entry.step2_answer = "";
+  }
+  logQuestion(entry);
   nextQuestion();
 }
 
@@ -1215,8 +1493,14 @@ function logQuestion(partial) {
     latency_ms: partial.latency_ms,
     tags: partial.tags,
     drill: round.drill,
-    len_mismatch: !partial.skipped && lenMismatch(partial.correct, partial.user_answer, partial.correct_answer)
+    len_mismatch: !partial.skipped && lenMismatch(partial.correct, partial.user_answer, partial.correct_answer),
+    sublab: round.sublab
   };
+  if (partial.step1_expected !== undefined) {
+    entry.step1_answer = partial.step1_answer;
+    entry.step1_expected = partial.step1_expected;
+    entry.step2_answer = partial.step2_answer;
+  }
   round.log.push(entry);
 }
 
@@ -1224,6 +1508,7 @@ function endRound() {
   if (!round || round.ended) return;
   round.ended = true;
   clearInterval(round.timerHandle);
+  clearFlash();
 
   var answered = round.log.filter(function (q) { return !q.skipped; });
   var correctList = answered.filter(function (q) { return q.correct; });
@@ -1243,16 +1528,31 @@ function endRound() {
     avg_time_ms: Math.round(avgTime),
     round_id: round.roundId,
     drill: round.drill,
-    legacy: false
+    legacy: false,
+    sublab: round.sublab
   };
 
   addQuestions(round.log);
   addRound(roundRecord);
   refreshUnlocks(getRounds(), getQuestions());
 
-  var gateAfter = computeGate(round.mode, round.difficulty, getRounds(), getQuestions());
+  var gateAfter = round.sublab ? null : computeGate(round.mode, round.difficulty, getRounds(), getQuestions());
   renderSummary(round, roundRecord, round.gateBefore, gateAfter);
   showView("summary");
+}
+
+// Display-only speed reference text for a Sub Lab round. Never used by gates.
+function subLabSpeedRefText(drillId, log) {
+  var refs = SETTINGS.subLab.speedRefMs[drillId];
+  if (!refs) return "No speed reference for this drill.";
+  var answered = log.filter(function (q) { return !q.skipped; });
+  var parts = [];
+  for (var key in refs) {
+    var rows = key === "all" ? answered : answered.filter(function (q) { return (q.tags || []).indexOf(key) !== -1; });
+    var avg = rows.length ? rows.reduce(function (s, q) { return s + q.latency_ms; }, 0) / rows.length : null;
+    parts.push((key === "all" ? "Avg" : key + " avg") + " " + (avg == null ? "-" : fmtMs(avg)) + " vs ref " + fmtMs(refs[key]));
+  }
+  return parts.join(" · ");
 }
 
 function renderSummary(roundState, record, gateBefore, gateAfter) {
@@ -1260,8 +1560,23 @@ function renderSummary(roundState, record, gateBefore, gateAfter) {
   $("sum-correct").textContent = record.correct;
   $("sum-accuracy").textContent = fmtPct(record.accuracy);
   $("sum-avg").textContent = fmtMs(record.avg_time_ms);
-  $("sum-gate-before").textContent = gateText(gateBefore);
-  $("sum-gate-after").textContent = gateText(gateAfter);
+
+  if (roundState.sublab) {
+    $("sum-gate-block").style.display = "none";
+    $("sum-sublab-block").style.display = "block";
+    $("sum-speed-ref").textContent = subLabSpeedRefText(record.difficulty, roundState.log);
+    var worst = weakestTags(computeTagStats(roundState.log), 1)[0];
+    $("sum-worst-tag").textContent = worst
+      ? worst.tag + " (" + fmtPct(worst.missRate * 100) + " miss, " + worst.attempts + " tries)"
+      : "none with 3+ attempts";
+    $("btn-summary-home").textContent = "Back to Sub Lab";
+  } else {
+    $("sum-gate-block").style.display = "block";
+    $("sum-sublab-block").style.display = "none";
+    $("sum-gate-before").textContent = gateText(gateBefore);
+    $("sum-gate-after").textContent = gateText(gateAfter);
+    $("btn-summary-home").textContent = "Back to home";
+  }
 
   var misses = roundState.log.filter(function (q) { return !q.skipped && !q.correct; });
   var missesEl = $("sum-misses");
@@ -1272,7 +1587,9 @@ function renderSummary(roundState, record, gateBefore, gateAfter) {
     misses.forEach(function (m) {
       var row = document.createElement("div");
       row.className = "miss-row";
-      row.innerHTML = '<span>' + m.question + '</span><span>you: ' + m.user_answer + ' · correct: ' + m.correct_answer + '</span>';
+      var you = m.step1_expected !== undefined ? m.step1_answer + " → " + m.user_answer : m.user_answer;
+      var right = m.step1_expected !== undefined ? m.step1_expected + " → " + m.correct_answer : m.correct_answer;
+      row.innerHTML = '<span>' + m.question + '</span><span>you: ' + you + ' · correct: ' + right + '</span>';
       missesEl.appendChild(row);
     });
   }
@@ -1307,6 +1624,7 @@ function renderHistory() {
     var flags = [];
     if (r.drill) flags.push("drill");
     if (r.legacy) flags.push("legacy");
+    if (r.sublab) flags.push("sublab");
     var when = new Date(r.timestamp);
     var whenStr = isNaN(when.getTime()) ? r.timestamp : when.toLocaleString();
     tr.innerHTML =
@@ -1365,7 +1683,12 @@ function bindStaticEvents() {
   $("btn-build-plan").onclick = buildTodaysPlan;
   $("btn-submit").onclick = submitAnswer;
   $("btn-skip").onclick = skipQuestion;
-  $("btn-summary-home").onclick = function () { showView("home"); renderDashboard(); };
+  $("btn-summary-home").onclick = function () {
+    if (round && round.sublab) { renderSubLab(); showView("sublab"); return; }
+    showView("home");
+    renderDashboard();
+  };
+  $("btn-sublab-home").onclick = function () { showView("home"); renderDashboard(); };
 
   $("btn-import").onclick = function () { $("file-import").click(); };
   $("file-import").onchange = function (e) {
@@ -1379,6 +1702,7 @@ function bindStaticEvents() {
 function init() {
   migrateLegacyStorageKeys();
   els.toast = $("toast");
+  $("app-version").textContent = SETTINGS.appVersion;
   bindStaticEvents();
   renderDashboard();
   showView("home");
