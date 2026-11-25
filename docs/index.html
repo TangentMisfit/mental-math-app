@@ -221,6 +221,7 @@
           <div class="stat">Avg time<b id="sum-avg">0ms</b></div>
         </div>
         <div id="sum-gate-block">
+          <div class="muted" id="sum-speed-goal">-</div>
           <div class="row">
             <div class="muted">Gate before: <span id="sum-gate-before">-</span></div>
           </div>
@@ -280,7 +281,7 @@
    SETTINGS — every tunable value lives here
    ============================================================ */
 var SETTINGS = {
-  appVersion: "v1.1.1",
+  appVersion: "v1.2.0",
   roundSeconds: 300,
   modes: ["add", "sub", "mul", "div"],
   comingSoonModes: ["pct", "scale", "mixed", "ratios"],
@@ -307,16 +308,18 @@ var SETTINGS = {
     mul: { beginner: 3000, intermediate: 5000, advanced: 15000 },
     div: { beginner: 3000, intermediate: 5000, advanced: 7000 }
   },
+  // Speed targets are goals, not gates. Advance only requires the window avg
+  // latency to be <= speed target * SPEED_CEILING_MULT (a loose ceiling).
+  SPEED_CEILING_MULT: 1.5,
 
   gate: {
     windowSize: 3,
     minAnswered: 10,
-    drillAccuracyPct: 85,
-    advanceAccuracyPct: 95,        // pooled across the window: sum correct / sum answered
-    advanceMinRoundAccuracyPct: 90, // every window round must also clear this
+    drillAccuracyPct: 85,           // any window round below this -> Drill
+    advanceAccuracyPct: 95,         // every window round must reach this to Advance
     tagMinAttempts: 3,
-    tagMissRatePct: 15,
-    tagLatencyMultiplier: 1.5
+    tagMissRatePct: 15,             // tag miss rate at/above this -> Drill
+    speedFocusMult: 1.5             // tag avg latency >= target * this -> speed focus (non-blocking)
   },
 
   weakSpot: {
@@ -756,8 +759,24 @@ function drillTagWeights(mode, difficulty, questions, universe) {
       return { tag: tag, weight: d.defaultWeight, attempts: s ? s.attempts : 0 };
     }
     var w = Math.max((s.misses / s.attempts) / d.missRateUnit, median(s.latencies) / target);
-    return { tag: tag, weight: w, attempts: s.attempts };
+    var missRate = s.misses / s.attempts;
+    var avg = s.latencies.reduce(function (sum, x) { return sum + x; }, 0) / s.attempts;
+    return {
+      tag: tag, weight: w, attempts: s.attempts, missRate: missRate, avgLatency: avg,
+      accuracyWeak: isAccuracyWeakTag({ attempts: s.attempts, missRate: missRate }),
+      speedFocus: isSpeedFocusTag({ attempts: s.attempts, avgLatency: avg }, target)
+    };
   });
+}
+
+// Targeted drill slots go to accuracy-weak tags first. Speed-focus tags are
+// used only when no tag is accuracy-weak; with neither, every candidate tag.
+function drillTargetPool(weights) {
+  var acc = weights.filter(function (w) { return w.accuracyWeak; });
+  if (acc.length) return acc;
+  var speed = weights.filter(function (w) { return w.speedFocus; });
+  if (speed.length) return speed;
+  return weights;
 }
 
 function pickWeightedTag(weights) {
@@ -836,6 +855,32 @@ function weakestTags(tagStats, n) {
     .slice(0, n);
 }
 
+// Accuracy-weak: enough attempts and miss rate at/above the Drill threshold.
+function isAccuracyWeakTag(t) {
+  return t.attempts >= SETTINGS.gate.tagMinAttempts && (t.missRate * 100) >= SETTINGS.gate.tagMissRatePct;
+}
+
+// Speed focus: enough attempts and avg latency >= speedFocusMult x target.
+// Non-blocking signal only: never changes gate status.
+function isSpeedFocusTag(t, speedTarget) {
+  return t.attempts >= SETTINGS.gate.tagMinAttempts && t.avgLatency >= SETTINGS.gate.speedFocusMult * speedTarget;
+}
+
+function speedCeilingMs(mode, difficulty) {
+  return SETTINGS.speedTargetMs[mode][difficulty] * SETTINGS.SPEED_CEILING_MULT;
+}
+
+// Window avg latency, weighted by questions answered per round. null if empty.
+function windowAvgLatency(windowRounds) {
+  var asked = 0, total = 0;
+  for (var i = 0; i < windowRounds.length; i++) {
+    var n = Number(windowRounds[i].asked) || 0;
+    asked += n;
+    total += (Number(windowRounds[i].avg_time_ms) || 0) * n;
+  }
+  return asked > 0 ? total / asked : null;
+}
+
 function computeGate(mode, difficulty, roundsOverride, questionsOverride) {
   var rounds = roundsOverride || getRounds();
   var allQuestions = questionsOverride || getQuestions();
@@ -845,34 +890,42 @@ function computeGate(mode, difficulty, roundsOverride, questionsOverride) {
   var windowQuestions = allQuestions.filter(function (q) { return roundIds[q.round_id]; });
   var tagStats = computeTagStats(windowQuestions);
   var pooledAccuracy = pooledWindowAccuracy(windowRounds);
+  var speedTarget = SETTINGS.speedTargetMs[mode][difficulty];
+  var ceiling = speedCeilingMs(mode, difficulty);
+  var avgLatency = windowAvgLatency(windowRounds);
+  var speedFocus = tagStats
+    .filter(function (t) { return isSpeedFocusTag(t, speedTarget); })
+    .sort(function (a, b) { return b.avgLatency - a.avgLatency; });
 
-  function result(status, label) {
-    return { status: status, label: label, window: windowRounds, tagStats: tagStats, pooledAccuracy: pooledAccuracy };
+  function result(status, label, reason) {
+    return {
+      status: status, label: label, reason: reason || "",
+      window: windowRounds, tagStats: tagStats, pooledAccuracy: pooledAccuracy,
+      avgLatency: avgLatency, speedTarget: speedTarget, speedCeiling: ceiling,
+      speedFocus: speedFocus
+    };
   }
 
   if (windowRounds.length < SETTINGS.gate.windowSize) {
     return result("Calibrating", "Calibrating (" + windowRounds.length + "/" + SETTINGS.gate.windowSize + ")");
   }
 
-  var speedTarget = SETTINGS.speedTargetMs[mode][difficulty];
-
+  // Drill is accuracy-only.
   var anyBelowDrill = windowRounds.some(function (r) { return r.accuracy < SETTINGS.gate.drillAccuracyPct; });
-  var badTag = tagStats.some(function (t) {
-    if (t.attempts < SETTINGS.gate.tagMinAttempts) return false;
-    return (t.missRate * 100) >= SETTINGS.gate.tagMissRatePct ||
-      t.avgLatency >= SETTINGS.gate.tagLatencyMultiplier * speedTarget;
-  });
-  if (anyBelowDrill || badTag) return result("Drill", "Drill");
+  var weakTag = tagStats.some(isAccuracyWeakTag);
+  if (anyBelowDrill || weakTag) {
+    return result("Drill", "Drill", anyBelowDrill
+      ? "A window round is below " + SETTINGS.gate.drillAccuracyPct + "% accuracy."
+      : "A tag has a miss rate of " + SETTINGS.gate.tagMissRatePct + "% or more.");
+  }
 
-  var pooledOk = pooledAccuracy != null && pooledAccuracy >= SETTINGS.gate.advanceAccuracyPct;
-  var everyRoundOk = windowRounds.every(function (r) { return r.accuracy >= SETTINGS.gate.advanceMinRoundAccuracyPct; });
-  var totalAsked = windowRounds.reduce(function (s, r) { return s + r.asked; }, 0);
-  var combinedAvg = totalAsked > 0
-    ? windowRounds.reduce(function (s, r) { return s + r.avg_time_ms * r.asked; }, 0) / totalAsked
-    : 0;
-  if (pooledOk && everyRoundOk && combinedAvg <= speedTarget) return result("Advance", "Advance");
+  var accuracyOk = windowRounds.every(function (r) { return r.accuracy >= SETTINGS.gate.advanceAccuracyPct; });
+  var speedOk = avgLatency != null && avgLatency <= ceiling;
+  if (accuracyOk && speedOk) return result("Advance", "Advance");
 
-  return result("Hold", "Hold");
+  return result("Hold", "Hold", accuracyOk
+    ? "Accuracy passing; speed above ceiling."
+    : "Every window round needs " + SETTINGS.gate.advanceAccuracyPct + "% accuracy.");
 }
 
 // Sum correct / sum answered across the window, as a percentage. null if empty.
@@ -886,7 +939,18 @@ function pooledWindowAccuracy(windowRounds) {
 }
 
 function gateText(gate) {
-  return gate.label + (gate.pooledAccuracy == null ? "" : " · pooled " + fmtPct(gate.pooledAccuracy));
+  return gate.label + (gate.pooledAccuracy == null ? "" : " · pooled " + fmtPct(gate.pooledAccuracy)) +
+    (gate.reason ? " · " + gate.reason : "");
+}
+
+// "4.9s / goal 4.5s · ceiling 6.8s". The speed target is a goal; the ceiling gates Advance.
+function speedGoalText(avgMs, mode, difficulty) {
+  return (avgMs == null ? "-" : fmtSec(avgMs)) + " / goal " + fmtSec(SETTINGS.speedTargetMs[mode][difficulty]) +
+    " · ceiling " + fmtSec(speedCeilingMs(mode, difficulty));
+}
+
+function speedFocusHtml(tags) {
+  return tags.map(function (t) { return t.tag + " " + fmtSec(t.avgLatency); }).join(", ");
 }
 
 function refreshUnlocks(rounds, questions) {
@@ -1087,6 +1151,9 @@ function fmtPct(n) {
 function fmtMs(n) {
   return Math.round(n) + "ms";
 }
+function fmtSec(ms) {
+  return (Math.round(ms / 100) / 10).toFixed(1) + "s";
+}
 
 /* ============================================================
    UI STATE
@@ -1132,7 +1199,7 @@ function renderDashboard() {
 
     var lastN = gate.window.length;
     var pooledAcc = gate.pooledAccuracy;
-    var avgTime = lastN ? (gate.window.reduce(function (s, r) { return s + r.avg_time_ms; }, 0) / lastN) : null;
+    var avgTime = gate.avgLatency;
 
     var card = document.createElement("div");
     card.className = "card";
@@ -1150,9 +1217,11 @@ function renderDashboard() {
       '<div class="muted">Level: ' + level + '</div>' +
       '<div class="stats-line">' +
         '<div class="stat">Pooled acc (last ' + lastN + '/3)<b>' + (pooledAcc == null ? "-" : fmtPct(pooledAcc)) + '</b></div>' +
-        '<div class="stat">Avg time<b>' + (avgTime == null ? "-" : fmtMs(avgTime)) + '</b></div>' +
+        '<div class="stat">Avg time<b>' + speedGoalText(avgTime, mode, level) + '</b></div>' +
       '</div>' +
+      (gate.reason ? '<div class="muted">' + gate.reason + '</div>' : '') +
       '<div class="tags-line">Weakest: ' + weakHtml + '</div>' +
+      (gate.speedFocus.length ? '<div class="tags-line">Speed focus: ' + speedFocusHtml(gate.speedFocus) + '</div>' : '') +
       '<div class="btn-row">' +
         '<button class="action secondary" data-play="' + mode + '|beginner">Practice beginner</button>' +
         '<button class="action" data-play="' + mode + '|' + level + '">Practice ' + level + '</button>' +
@@ -1267,7 +1336,7 @@ function buildTodaysPlan() {
   var entries = SETTINGS.modes.map(function (mode) {
     var level = currentLevel(mode, unlocked);
     var gate = computeGate(mode, level, rounds, questions);
-    return { mode: mode, level: level, status: gate.status };
+    return { mode: mode, level: level, status: gate.status, speedFocus: gate.speedFocus };
   });
   entries.sort(function (a, b) { return priority[a.status] - priority[b.status]; });
   var plan = entries.slice(0, 3);
@@ -1281,6 +1350,16 @@ function buildTodaysPlan() {
     item.innerHTML = '<span>' + SETTINGS.modeLabels[p.mode] + ' &middot; ' + p.level + ' (' + p.status + ')</span>' +
       '<button class="action" style="flex:none;padding:6px 10px;" data-play="' + p.mode + '|' + p.level + '">Go</button>';
     listEl.appendChild(item);
+  }
+  // Speed focus: non-blocking, listed separately from drill items.
+  var focus = entries.filter(function (e) { return e.speedFocus.length; });
+  if (focus.length) {
+    var line = document.createElement("div");
+    line.className = "tags-line";
+    line.innerHTML = "Speed focus: " + focus.map(function (e) {
+      return SETTINGS.modeLabels[e.mode] + " &middot; " + e.level + " (" + speedFocusHtml(e.speedFocus) + ")";
+    }).join("; ");
+    listEl.appendChild(line);
   }
   $("plan-card").style.display = plan.length ? "block" : "none";
   bindDashboardActions();
@@ -1345,7 +1424,7 @@ function pickNextQuestion() {
   var seenSet = { has: function (q) { return !!round.seen[q]; } };
   var targetTag = null;
   if (round.drill && round.drillWeights.length && Math.random() >= SETTINGS.drill.unweightedFraction) {
-    targetTag = pickWeightedTag(round.drillWeights);
+    targetTag = pickWeightedTag(drillTargetPool(round.drillWeights));
   }
   var cand = generateUnique(round.mode, round.difficulty, seenSet, targetTag);
   round.seen[cand.question] = true;
@@ -1617,6 +1696,7 @@ function renderSummary(roundState, record, gateBefore, gateAfter) {
     $("sum-sublab-block").style.display = "none";
     $("sum-gate-before").textContent = gateText(gateBefore);
     $("sum-gate-after").textContent = gateText(gateAfter);
+    $("sum-speed-goal").textContent = "Speed: " + speedGoalText(record.avg_time_ms, record.mode, record.difficulty);
     $("btn-summary-home").textContent = "Back to home";
   }
 

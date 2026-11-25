@@ -286,17 +286,52 @@ test("rounds below minAnswered do not qualify", () => {
   assert.strictEqual(gate.status, "Calibrating");
 });
 
-test("Advance: pooled >=95%, every round >=90%, combined latency <= target", () => {
-  // pooled = (20 + 19 + 18) / 60 = 95%, one round at 90%
+test("SPEED_CEILING_MULT is 1.5; speed targets unchanged", () => {
+  assert.strictEqual(app.SETTINGS.SPEED_CEILING_MULT, 1.5);
+  assert.strictEqual(JSON.stringify(app.SETTINGS.speedTargetMs), JSON.stringify({
+    add: { beginner: 3000, intermediate: 4500, advanced: 7000 },
+    sub: { beginner: 3000, intermediate: 4500, advanced: 7000 },
+    mul: { beginner: 3000, intermediate: 5000, advanced: 15000 },
+    div: { beginner: 3000, intermediate: 5000, advanced: 7000 }
+  }));
+  assert.strictEqual(app.speedCeilingMs("add", "intermediate"), 6750);
+});
+
+test("Advance: every round >=95% and window avg latency <= target x 1.5", () => {
+  // add intermediate target 4500ms (goal), ceiling 6750ms; avg 6000ms is over goal but under ceiling
   const rounds = [
-    makeRound({ asked: 20, correct: 20, accuracy: 100, avg_time_ms: 3000 }),
-    makeRound({ asked: 20, correct: 19, accuracy: 95, avg_time_ms: 4000 }),
-    makeRound({ asked: 20, correct: 18, accuracy: 90, avg_time_ms: 4200 })
+    makeRound({ asked: 20, correct: 20, accuracy: 100, avg_time_ms: 6000 }),
+    makeRound({ asked: 20, correct: 19, accuracy: 95, avg_time_ms: 6000 }),
+    makeRound({ asked: 20, correct: 19, accuracy: 95, avg_time_ms: 6000 })
   ];
-  // add intermediate target = 4500ms
   const gate = app.computeGate("add", "intermediate", rounds, []);
   assert.strictEqual(gate.status, "Advance");
-  assert.ok(Math.abs(gate.pooledAccuracy - 95) < 1e-9);
+  assert.strictEqual(gate.avgLatency, 6000);
+});
+
+test("Advance at exactly the ceiling", () => {
+  const rounds = [makeRound({ avg_time_ms: 6750 }), makeRound({ avg_time_ms: 6750 }), makeRound({ avg_time_ms: 6750 })];
+  assert.strictEqual(app.computeGate("add", "intermediate", rounds, []).status, "Advance");
+});
+
+test("Hold with speed reason when accuracy passes but latency is over the ceiling", () => {
+  const rounds = [makeRound({ avg_time_ms: 7000 }), makeRound({ avg_time_ms: 7000 }), makeRound({ avg_time_ms: 7000 })];
+  const gate = app.computeGate("add", "intermediate", rounds, []);
+  assert.strictEqual(gate.status, "Hold");
+  assert.strictEqual(gate.reason, "Accuracy passing; speed above ceiling.");
+});
+
+test("Hold when one round is 90% even though pooled >= 95%", () => {
+  // pooled = (40 + 40 + 18) / 100 = 98%; last round 90% (no longer enough)
+  const rounds = [
+    makeRound({ asked: 40, correct: 40, accuracy: 100 }),
+    makeRound({ asked: 40, correct: 40, accuracy: 100 }),
+    makeRound({ asked: 20, correct: 18, accuracy: 90 })
+  ];
+  const gate = app.computeGate("add", "intermediate", rounds, []);
+  assert.ok(gate.pooledAccuracy >= 95);
+  assert.strictEqual(gate.status, "Hold");
+  assert.notStrictEqual(gate.reason, "Accuracy passing; speed above ceiling.");
 });
 
 test("Hold when pooled accuracy < 95% even though each round >= 90%", () => {
@@ -361,7 +396,7 @@ test("Drill when a tag has >=3 attempts and miss rate >=15%", () => {
   assert.strictEqual(gate.status, "Drill");
 });
 
-test("Drill when a tag's avg latency >= 1.5x speed target", () => {
+test("slow tag (avg latency >= 1.5x target) is speed focus, not Drill", () => {
   const rounds = [
     makeRound({ round_id: "rA", accuracy: 96 }),
     makeRound({ round_id: "rB", accuracy: 96 }),
@@ -378,7 +413,19 @@ test("Drill when a tag's avg latency >= 1.5x speed target", () => {
   });
   // add intermediate target 4500ms, 1.5x = 6750ms; 7000 exceeds it
   const gate = app.computeGate("add", "intermediate", rounds, questions);
-  assert.strictEqual(gate.status, "Drill");
+  assert.notStrictEqual(gate.status, "Drill");
+  assert.strictEqual(gate.status, "Advance"); // rounds avg 2000ms, all 96%
+  assert.deepStrictEqual(Array.from(gate.speedFocus, (t) => t.tag), ["carry:1"]);
+});
+
+test("speed focus needs >= 3 attempts", () => {
+  const rounds = [
+    makeRound({ round_id: "rA" }), makeRound({ round_id: "rB" }), makeRound({ round_id: "rC" })
+  ];
+  const questions = ["rA", "rB"].map((rid) => ({
+    round_id: rid, correct: true, skipped: false, latency_ms: 9000, tags: ["carry:1"]
+  }));
+  assert.strictEqual(app.computeGate("add", "intermediate", rounds, questions).speedFocus.length, 0);
 });
 
 test("Hold when accuracy/speed don't clear Advance but nothing triggers Drill", () => {
@@ -468,6 +515,21 @@ test("drill weights ignore legacy, skipped, other modes, and only use last 200",
 test("tag universe for add intermediate has the 4 reachable carry tags", () => {
   assert.deepStrictEqual(Array.from(app.tagUniverse("add", "intermediate")),
     ["carry:none", "carry:ones", "carry:ones+tens", "carry:tens"]);
+});
+
+test("drill targets accuracy-weak tags first, speed-focus tags only when none", () => {
+  const qs = [];
+  // carry:tens: 4 attempts, 1 miss (25%) -> accuracy-weak
+  for (let i = 0; i < 4; i++) qs.push(hq("52 + 61", i !== 0, 1000));
+  // carry:ones: 3 correct, avg 9000ms >= 6750 -> speed focus
+  for (let i = 0; i < 3; i++) qs.push(hq("15 + 18", true, 9000));
+  const universe = ["carry:none", "carry:ones", "carry:tens"];
+  const w = app.drillTagWeights("add", "intermediate", qs, universe);
+  assert.deepStrictEqual(Array.from(app.drillTargetPool(w), (x) => x.tag), ["carry:tens"]);
+  const noWeak = app.drillTagWeights("add", "intermediate", qs.slice(4), universe);
+  assert.deepStrictEqual(Array.from(app.drillTargetPool(noWeak), (x) => x.tag), ["carry:ones"]);
+  const neither = app.drillTagWeights("add", "intermediate", [], universe);
+  assert.strictEqual(app.drillTargetPool(neither).length, 3);
 });
 
 test("pickWeightedTag follows weights", () => {

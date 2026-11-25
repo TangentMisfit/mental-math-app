@@ -78,11 +78,19 @@ Positional carry/borrow: list the columns that produce a carry (add) or need a b
 ## Gates (per mode + difficulty)
 Window: last 3 rounds with `drill=false`, `legacy=false`, and >= 10 answered.
 
+Accuracy is the primary gate. Speed is a loose ceiling on Advance plus a non-blocking signal.
+
+`SPEED_CEILING_MULT = 1.5` (in `SETTINGS`). Advance ceiling = speed target × `SPEED_CEILING_MULT`.
+
 Evaluate in this order; first match wins:
 1. **Calibrating**: fewer than 3 qualifying rounds. Display "Calibrating (n/3)".
-2. **Drill**: any round < 85% accuracy, OR any tag with >= 3 attempts in the window having miss rate >= 15% or avg latency >= 1.5× speed target.
-3. **Advance**: pooled accuracy across the 3 window rounds (sum correct / sum answered) >= 95% AND every window round >= 90% AND combined avg latency <= speed target. Unlocks the next difficulty.
-4. **Hold**: everything else.
+2. **Drill** (accuracy-only): any window round < 85% accuracy, OR any tag with >= 3 attempts in the window having miss rate >= 15%. Latency never triggers Drill.
+3. **Advance**: every one of the 3 window rounds >= 95% accuracy AND window avg latency (weighted by answered per round) <= speed target × `SPEED_CEILING_MULT`. Unlocks the next difficulty.
+4. **Hold**: everything else. If accuracy passes Advance but latency is over the ceiling, the reason reads "Accuracy passing; speed above ceiling."
+
+**Speed focus** (non-blocking signal): any tag with >= 3 attempts in the window and avg latency >= 1.5× speed target. Shown on the dashboard card and on a separate "Speed focus" line in Today's plan. Never changes gate status.
+
+Speed targets are goals, not gates. Displayed as avg vs goal plus the advance ceiling, e.g. "4.9s / goal 4.5s · ceiling 6.8s". Pooled window accuracy is still displayed but no longer gates.
 
 Speed targets (ms):
 
@@ -96,14 +104,15 @@ Speed targets (ms):
 Weakest tags: rank by miss rate, tiebreak by avg latency, minimum 3 attempts.
 
 ## Features
-- **Home dashboard**: one card per mode showing level, gate status, pooled window accuracy, avg time, top 2 weakest tags.
-- **Today's plan**: queues up to 3 rounds. Order: Drill, then Calibrating, then Hold.
+- **Home dashboard**: one card per mode showing level, gate status (with Drill/Hold reason), pooled window accuracy, avg time vs goal and ceiling, top 2 weakest tags, speed-focus tags.
+- **Today's plan**: queues up to 3 rounds. Order: Drill, then Calibrating, then Hold. Speed-focus tags are listed on a separate "Speed focus" line, not as plan items.
 - **Weak-spot round** (modes in Drill), logged `drill=true`:
   - 20% of questions: plain random from the normal generator.
-  - 80%: pick a target tag by weighted sampling, then rejection-sample the normal generator until the question has that tag (cap 200 tries, then any unseen problem).
+  - 80%: pick a target tag by weighted sampling from a priority pool, then rejection-sample the normal generator until the question has that tag (cap 200 tries, then any unseen problem).
   - Candidate tags: every tag the current generator can produce for the mode+difficulty.
   - Weight per tag = `max(miss_rate / 0.05, median_latency / speed_target)`, from the last 200 answered (non-skipped), non-legacy questions for that mode+difficulty (drill rows included). Tags with < 3 attempts get weight 1.
-- **End-of-round summary**: asked, correct, accuracy, avg time, gate status before and after (with pooled accuracy), every miss, 3 slowest correct answers.
+  - Priority pool (same history): accuracy-weak tags (>= 3 attempts, miss rate >= 15%) first. Only if none, speed-focus tags (>= 3 attempts, avg latency >= 1.5× speed target). If neither, all candidate tags.
+- **End-of-round summary**: asked, correct, accuracy, avg time, speed vs goal and ceiling, gate status before and after (with pooled accuracy and reason), every miss, 3 slowest correct answers.
 - Dark mode via `prefers-color-scheme`.
 
 ## Sub Lab (v1.x)
