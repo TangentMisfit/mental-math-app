@@ -96,10 +96,31 @@ console.log("Answered lock");
   });
 });
 
+test("scaffold single input: rapid double submit logs one question; Submit and Steps disabled in pause", () => {
+  const a = loadApp();
+  a.startRound("sublab", "scaffold", false);
+  const first = a.round.current;
+  type(a, first.answer + 1); // miss -> longer pause
+  pressSubmit(a);
+  assert.strictEqual(a.__els["btn-submit"].disabled, true);
+  assert.strictEqual(a.__els["btn-steps"].disabled, true);
+  pressSubmit(a); pressEnter(a);
+  a.useScaffoldSteps(); // ignored during the pause
+  assert.strictEqual(a.round.stepped, false);
+  a.skipQuestion();
+  assert.strictEqual(a.round.log.length, 1);
+  assert.strictEqual(a.round.log[0].stepped, false);
+  a.__flushTimers();
+  assert.notStrictEqual(a.round.current, first);
+  assert.strictEqual(a.__els["btn-submit"].disabled, false);
+  assert.strictEqual(a.__els["btn-steps"].disabled, false);
+});
+
 test("scaffold step 1: rapid double submit advances once and logs nothing", () => {
   const a = loadApp();
   a.startRound("sublab", "scaffold", false);
   const s = a.round.current.scaffold;
+  a.useScaffoldSteps();
   type(a, s.step1);
   pressSubmit(a);
   pressSubmit(a);
@@ -118,6 +139,7 @@ test("scaffold step 1: rapid double submit advances once and logs nothing", () =
 test("scaffold step 2: rapid double submit logs one question", () => {
   const a = loadApp();
   a.startRound("sublab", "scaffold", false);
+  a.useScaffoldSteps();
   type(a, a.round.current.scaffold.step1);
   pressSubmit(a);
   type(a, a.round.current.answer);

@@ -181,10 +181,7 @@ function answerAll(a, n, wrongEvery) {
   for (let i = 0; i < n; i++) {
     const cur = a.round.current;
     const wrong = wrongEvery && i % wrongEvery === 0;
-    if (cur.scaffold) {
-      a.round.answerBuffer = String(cur.scaffold.step1);
-      a.submitAnswer();
-    }
+    // Scaffold defaults to a single final-answer input.
     a.round.answerBuffer = String(wrong ? cur.answer + 1 : cur.answer);
     a.submitAnswer();
     a.nextQuestion(); // feedback delay is stubbed out
@@ -245,7 +242,12 @@ function allGates(a) {
       assert.strictEqual(q.sublab, true);
       assert.ok(q.latency_ms >= 0 && q.tags.length >= 1);
       if (drillId === "scaffold") {
-        assert.ok(q.step1_answer !== undefined && q.step1_expected !== undefined && q.step2_answer === q.user_answer);
+        assert.strictEqual(q.stepped, false);
+        assert.strictEqual(q.step1_answer, "");
+        assert.strictEqual(q.step2_answer, "");
+        assert.strictEqual(typeof q.step1_expected, "number");
+      } else {
+        assert.strictEqual(q.stepped, undefined);
       }
     });
     // A sublab round with the same mode/difficulty cannot qualify for a gate window either.
@@ -272,16 +274,87 @@ test("Today's plan never contains sublab", () => {
   assert.ok(!/sublab|Sub Lab/.test(a.__els["plan-list"].innerHTML));
 });
 
-test("scaffold is correct only when both steps are correct", () => {
+test("scaffold single input: correct final answer is graded correct in one submit", () => {
+  const a = loadApp();
+  a.startRound("sublab", "scaffold", false);
+  const cur = a.round.current;
+  assert.strictEqual(a.__els["question-text"].textContent, cur.question + " = ?");
+  assert.strictEqual(a.__els["question-hint"].textContent, "Round " + cur.scaffold.b + " up to " + cur.scaffold.r);
+  assert.strictEqual(a.__els["steps-row"].style.display, "block", "Steps button offered");
+  assert.strictEqual(a.__els["question-step"].style.display, "none");
+  a.round.answerBuffer = String(cur.answer); a.submitAnswer();
+  const q = a.round.log[0];
+  assert.strictEqual(a.round.log.length, 1);
+  assert.strictEqual(q.correct, true);
+  assert.strictEqual(q.stepped, false);
+  assert.strictEqual(q.user_answer, String(cur.answer));
+  assert.strictEqual(q.step1_answer, "");
+  assert.strictEqual(q.step1_expected, cur.scaffold.step1);
+  assert.strictEqual(q.step2_answer, "");
+  assert.deepStrictEqual(Array.from(q.tags), Array.from(cur.tags));
+});
+
+test("scaffold single input: wrong answer shows the worked breakdown", () => {
+  const a = loadApp();
+  a.startRound("sublab", "scaffold", false);
+  const cur = a.round.current, s = cur.scaffold;
+  a.round.answerBuffer = String(cur.answer + 1); a.submitAnswer();
+  const q = a.round.log[0];
+  assert.strictEqual(q.correct, false);
+  assert.strictEqual(q.stepped, false);
+  const fb = a.__els["feedback"].textContent;
+  assert.ok(fb.indexOf(s.a + " - " + s.r + " = " + s.step1 + ", + " + s.adj + " = " + cur.answer) !== -1, fb);
+  assert.ok(fb.indexOf("you " + (cur.answer + 1)) !== -1 && fb.indexOf("answer " + cur.answer) !== -1, fb);
+});
+
+test("scaffold stepped: correct only when both steps are correct, both answers logged", () => {
   const a = loadApp();
   a.startRound("sublab", "scaffold", false);
   const s = a.round.current.scaffold;
+  a.useScaffoldSteps();
+  assert.strictEqual(a.__els["question-step"].style.display, "block");
+  assert.strictEqual(a.__els["steps-row"].style.display, "none");
   a.round.answerBuffer = String(s.step1 + 1); a.submitAnswer();   // wrong step 1
+  assert.strictEqual(a.round.log.length, 0, "step 1 never logs");
   a.round.answerBuffer = String(a.round.current.answer); a.submitAnswer(); // right final
   const q = a.round.log[0];
   assert.strictEqual(q.correct, false);
+  assert.strictEqual(q.stepped, true);
   assert.strictEqual(q.step1_answer, String(s.step1 + 1));
   assert.strictEqual(q.step1_expected, s.step1);
+  assert.strictEqual(q.step2_answer, String(a.round.current.answer));
+});
+
+test("scaffold stepped: both steps right is correct; next question returns to single input", () => {
+  const a = loadApp();
+  a.startRound("sublab", "scaffold", false);
+  const s = a.round.current.scaffold;
+  a.useScaffoldSteps();
+  a.round.answerBuffer = String(s.step1); a.submitAnswer();
+  a.round.answerBuffer = String(a.round.current.answer); a.submitAnswer();
+  assert.strictEqual(a.round.log[0].correct, true);
+  assert.strictEqual(a.round.log[0].stepped, true);
+  a.nextQuestion();
+  assert.strictEqual(a.round.stepped, false);
+  assert.strictEqual(a.__els["steps-row"].style.display, "block");
+  a.round.answerBuffer = String(a.round.current.answer); a.submitAnswer();
+  assert.strictEqual(a.round.log[1].correct, true);
+  assert.strictEqual(a.round.log[1].stepped, false);
+});
+
+test("scaffold miss pause is 2500 ms; other misses keep the normal pause", () => {
+  assert.strictEqual(app.SETTINGS.subLab.scaffoldMissDelayMs, 2500);
+  const delays = [];
+  const a = loadApp();
+  a.setTimeout = (fn, ms) => { delays.push(ms); return 0; };
+  a.startRound("sublab", "scaffold", false);
+  a.round.answerBuffer = String(a.round.current.answer + 1); a.submitAnswer();
+  a.nextQuestion();
+  a.round.answerBuffer = String(a.round.current.answer); a.submitAnswer();
+  a.endRound();
+  a.startRound("sublab", "nearround", false);
+  a.round.answerBuffer = String(a.round.current.answer + 1); a.submitAnswer();
+  assert.deepStrictEqual(delays, [2500, a.SETTINGS.feedbackDelayMs, a.SETTINGS.feedbackDelayMs]);
 });
 
 console.log("CSV export: new columns appended at the end");
@@ -294,16 +367,25 @@ test("rounds.csv appends sublab", () => {
   assert.ok(lines[2].endsWith(",false"), "old rows export sublab=false");
 });
 
-test("questions.csv keeps the original 13 columns in order, then appends the new ones", () => {
+test("questions.csv keeps the original columns in order, with stepped appended last", () => {
   const csv = app.questionsToCSV([
+    { question: "742 - 386 = ?", correct_answer: 356, user_answer: "356", correct: true, skipped: false, tags: ["round_hundred", "borrow1"],
+      sublab: true, step1_answer: "342", step1_expected: 342, step2_answer: "356", stepped: true },
+    { question: "742 - 386 = ?", correct_answer: 356, user_answer: "356", correct: true, skipped: false, tags: ["round_hundred", "borrow1"],
+      sublab: true, step1_answer: "", step1_expected: 342, step2_answer: "", stepped: false },
     { question: "742 - 386 = ?", correct_answer: 356, user_answer: "356", correct: true, skipped: false, tags: ["round_hundred", "borrow1"],
       sublab: true, step1_answer: "342", step1_expected: 342, step2_answer: "356" },
     { question: "52 + 61 = ?", correct_answer: 113, user_answer: "113", correct: true, skipped: false, tags: ["carry:tens"] }
   ]);
   const lines = csv.split("\n");
-  assert.strictEqual(lines[0], "timestamp,round_id,mode,difficulty,question,correct_answer,user_answer,correct,skipped,latency_ms,tags,drill,len_mismatch,sublab,step1_answer,step1_expected,step2_answer");
-  assert.ok(lines[1].endsWith(",true,342,342,356"));
-  assert.ok(lines[2].endsWith(",false,,,"), "old rows: sublab=false, step columns blank");
+  const header = lines[0].split(",");
+  assert.strictEqual(lines[0], "timestamp,round_id,mode,difficulty,question,correct_answer,user_answer,correct,skipped,latency_ms,tags,drill,len_mismatch,sublab,step1_answer,step1_expected,step2_answer,stepped");
+  assert.strictEqual(header[header.length - 1], "stepped");
+  assert.ok(lines[1].endsWith(",true,342,342,356,true"), lines[1]);
+  assert.ok(lines[2].endsWith(",true,,342,,false"), lines[2]);
+  assert.ok(lines[3].endsWith(",true,342,342,356,"), "older scaffold row: stepped blank");
+  assert.ok(lines[4].endsWith(",false,,,,"), "old non-scaffold rows: sublab=false, step and stepped columns blank");
+  lines.forEach((l) => assert.strictEqual(l.split(",").length, header.length));
 });
 
 console.log("\n" + passed + " passed, " + failed + " failed");

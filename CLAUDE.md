@@ -49,7 +49,7 @@ Match the Python file unless noted. Inclusive ranges, operands drawn independent
 - 300 seconds, visible countdown, ends at 0 even mid-question.
 - Skip: logged with `skipped=true`; excluded from asked, correct, and latency. Does not end the round.
 - Empty submit does nothing.
-- Answered lock: once a question's final answer is accepted, every further submit, skip, and keypad press is ignored until the next question is displayed; Submit and Skip are disabled during the feedback pause. Applies to normal, drill, and all Sub Lab rounds (scaffold step 1 clears the input and moves to step 2; the lock applies at step 2). A round ending during the pause never logs the question again, and a pending feedback timer never advances a different round.
+- Answered lock: once a question's final answer is accepted, every further submit, skip, and keypad press is ignored until the next question is displayed; Submit, Skip, and the scaffold Steps button are disabled during the feedback pause. Applies to normal, drill, and all Sub Lab rounds, including scaffold single-input and stepped questions (stepped step 1 clears the input and moves to step 2; the lock applies at step 2). A round ending during the pause never logs the question again, and a pending feedback timer never advances a different round.
 - Duplicate check (read-only): `findLikelyDuplicates(questions)` flags rows with the same round_id, question, and user answer within 2 s of an earlier match. `node tests/dup_check.js <questions.csv>` reports counts per mode/difficulty. Never modifies stored data.
 
 ## Levels
@@ -59,10 +59,11 @@ Match the Python file unless noted. Inclusive ranges, operands drawn independent
 
 ## Data (localStorage)
 - Round log: `timestamp, mode, difficulty, round_seconds, asked, correct, accuracy, avg_time_ms, round_id, drill, legacy, stage, sublab`
-- Question log: `timestamp, round_id, mode, difficulty, question, correct_answer, user_answer, correct, skipped, latency_ms, tags, drill, len_mismatch, sublab, step1_answer, step1_expected, step2_answer`
+- Question log: `timestamp, round_id, mode, difficulty, question, correct_answer, user_answer, correct, skipped, latency_ms, tags, drill, len_mismatch, sublab, step1_answer, step1_expected, step2_answer, stepped`
 - `len_mismatch`: true when the answer is wrong AND the user's answer has a different digit count than the correct answer (likely typo). Always false for skipped rows. Scoring unchanged: still a wrong answer. Rows logged before this column existed have it computed on export.
 - `sublab`: true for Sub Lab rounds/questions. Missing on older rows; exported as `false`.
-- `step1_answer`, `step1_expected`, `step2_answer`: Sub Lab scaffold questions only; blank otherwise.
+- `step1_answer`, `step1_expected`, `step2_answer`: Sub Lab scaffold questions only; blank otherwise. Single-input scaffold questions fill only `step1_expected`.
+- `stepped`: scaffold questions only; true when the Steps button was used for that question. Blank for non-scaffold rows and rows logged before this column existed.
 - New columns are always appended at the end of the CSV so older column positions never move.
 
 ## Tags (computed at generation)
@@ -128,13 +129,15 @@ Practice-only subtraction sub-skill drills, opened from the Sub Lab button on th
 | id | Generator | Tags | Speed ref |
 |---|---|---|---|
 | `complement` | 50/50: `100 - n`, n 11-99; or `1000 - n`, n 101-999. Multiples of 10 excluded. | `comp100` / `comp1000` | 2500 ms comp100, 4000 ms comp1000 |
-| `scaffold` | a 400-999, b 101..(a-50), b not a multiple of 10. Two inputs (see below). | `round_hundred` or `round_ten`, plus borrow-count tag of `a - r` | none |
+| `scaffold` | a 400-999, b 101..(a-50), b not a multiple of 10. Final answer first; optional Steps (see below). | `round_hundred` or `round_ten`, plus borrow-count tag of `a - r` | none |
 | `nearround` | a 300-999, b 100-999, distance from b up to the next hundred above it is 1-30 (b mod 100 in 70-99), a - b >= 10. Single input. | borrow-count tag of `a - b`, `near_hundred` | 7000 ms |
 | `flash` | sub/advanced generator. Problem visible for the flash duration, then shown as `? - ? = ?`; input stays live; latency from first display. Duration 1500/2000/3000 ms, default 2000, stored in `mma_flash_ms`. | borrow-count tag of `a - b`, `flash` | none |
 
 Scaffold rounding rule: r = next hundred above b if (r - b) <= 30, else r = next ten above b. adj = r - b.
-- Screen: `a - b` at top the whole question, hint `Round b up to r`. Input 1: `a - r = ?`. Input 2: `+ adj = ?` (adj shown). Final answer = a - b.
-- Correct only if both inputs are correct. Latency = display to second submit. `question` = `a - b = ?`, `user_answer` = `step2_answer` = second input, `step1_answer` = first input, `step1_expected` = a - r. A skip records whatever step 1 had.
+- Final-answer-first: each question shows `a - b = ?` and the hint `Round b up to r`, with one input for the final answer (a - b). Graded like a normal question. Latency = display to final submit. Logged `stepped=false`, `step1_expected` = a - r, `step1_answer` and `step2_answer` blank.
+- Optional Steps: a small Steps button under the input switches that question only to the two-input flow: `a - b` at top, input 1 `a - r = ?`, input 2 `+ adj = ?` (adj shown). Correct only if both inputs are correct. Latency = display to second submit. Logged `stepped=true`, `user_answer` = `step2_answer` = second input, `step1_answer` = first input, `step1_expected` = a - r. The next question returns to single input.
+- Miss feedback: the feedback area shows the user's answer vs the correct answer plus the worked breakdown `a - r = X, + adj = final` with real numbers. The feedback pause is 2500 ms for scaffold misses (`SETTINGS.subLab.scaffoldMissDelayMs`); all other feedback keeps the normal pause. No extra input.
+- `question` = `a - b = ?`. A skip records `stepped` and whatever step 1 had.
 
 ## Import / export
 - **Import CSV** (legacy `progress.csv`):
@@ -145,7 +148,7 @@ Scaffold rounding rule: r = next hundred above b if (r - b) <= 30, else r = next
   - Set `legacy=true`: visible in history, never counts toward gates
 - **Export**: two separate buttons, Export rounds.csv and Export questions.csv, each triggering exactly one download (Android Chrome blocks back-to-back downloads).
   - rounds.csv columns, in order: `timestamp, mode, difficulty, round_seconds, asked, correct, accuracy, avg_time_ms, round_id, drill, legacy, stage, sublab`.
-  - questions.csv columns, in order: `timestamp, round_id, mode, difficulty, question, correct_answer, user_answer, correct, skipped, latency_ms, tags, drill, len_mismatch, sublab, step1_answer, step1_expected, step2_answer` (tags joined with `|`, as stored).
+  - questions.csv columns, in order: `timestamp, round_id, mode, difficulty, question, correct_answer, user_answer, correct, skipped, latency_ms, tags, drill, len_mismatch, sublab, step1_answer, step1_expected, step2_answer, stepped` (tags joined with `|`, as stored; `stepped` is the last column).
   - Any new column is appended at the end.
 
 ## Known Python bugs (reference only; do not fix the .py)

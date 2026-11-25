@@ -112,6 +112,8 @@
   .question-hint { font-size: 14px; color: var(--text-dim); margin-top: 8px; }
   .question-step { font-size: 22px; font-weight: 600; margin-top: 10px; font-variant-numeric: tabular-nums; }
   .question-step .done { color: var(--text-dim); font-size: 17px; }
+  .steps-row { text-align: center; margin: -10px 0 10px; }
+  button.steps-btn { flex: none; padding: 5px 14px; font-size: 13px; }
   .app-version { font-size: 11px; font-weight: 500; color: var(--text-dim); margin-left: 4px; }
   .opt-btn.selected { background: var(--accent); color: var(--accent-text); }
   .answer-display {
@@ -203,6 +205,9 @@
         <div class="question-step" id="question-step" style="display:none;"></div>
       </div>
       <div class="answer-display" id="answer-display">&nbsp;</div>
+      <div class="steps-row" id="steps-row" style="display:none;">
+        <button class="action secondary steps-btn" id="btn-steps">Steps</button>
+      </div>
       <div class="feedback" id="feedback"></div>
       <div class="keypad" id="keypad"></div>
       <div class="round-controls">
@@ -281,7 +286,7 @@
    SETTINGS — every tunable value lives here
    ============================================================ */
 var SETTINGS = {
-  appVersion: "v1.2.0",
+  appVersion: "v1.3.0",
   roundSeconds: 300,
   modes: ["add", "sub", "mul", "div"],
   comingSoonModes: ["pct", "scale", "mixed", "ratios"],
@@ -364,12 +369,13 @@ var SETTINGS = {
     },
     drillDescriptions: {
       complement: "100 - n and 1000 - n",
-      scaffold: "Two steps: a - r, then + adjustment",
+      scaffold: "Final answer; tap Steps for a - r, then + adjustment",
       nearround: "a - b where b is 1-30 below a hundred",
       flash: "3-digit a - b, operands hidden after a moment"
     },
     complement: { n100: [11, 99], n1000: [101, 999] }, // multiples of 10 excluded
     scaffold: { a: [400, 999], bMin: 101, bGapBelowA: 50, maxHundredGap: 30 },
+    scaffoldMissDelayMs: 2500, // feedback pause after a scaffold miss (shows the worked breakdown)
     nearround: { a: [300, 999], b: [100, 999], maxDistToHundred: 30, minDiff: 10 },
     flash: { difficulty: "advanced", optionsMs: [1500, 2000, 3000], defaultMs: 2000 },
     // Display-only speed references (ms); never used by any gate.
@@ -994,9 +1000,10 @@ function roundsToCSV(rounds) {
 
 function questionsToCSV(questions) {
   // New columns are appended at the end to stay backward compatible.
-  // step1_* / step2_answer are filled only for Sub Lab scaffold questions.
+  // step1_* / step2_answer / stepped are filled only for Sub Lab scaffold questions.
+  // Rows logged before "stepped" existed export it blank.
   var header = ["timestamp", "round_id", "mode", "difficulty", "question", "correct_answer", "user_answer", "correct", "skipped", "latency_ms", "tags", "drill", "len_mismatch",
-    "sublab", "step1_answer", "step1_expected", "step2_answer"];
+    "sublab", "step1_answer", "step1_expected", "step2_answer", "stepped"];
   var lines = [header.join(",")];
   for (var i = 0; i < questions.length; i++) {
     var q = questions[i];
@@ -1449,6 +1456,27 @@ function renderScaffoldStep() {
   }
 }
 
+// Scaffold layout. Default: single final-answer input ("a - b = ?").
+// After Steps: "a - b" plus the two-step area (a - r = ?, then + adj = ?).
+function renderScaffold() {
+  var stepped = round.stepped;
+  $("question-text").textContent = round.current.question + (stepped ? "" : " = ?");
+  $("question-step").style.display = stepped ? "block" : "none";
+  $("steps-row").style.display = !stepped && !round.answered ? "block" : "none";
+  if (stepped) renderScaffoldStep();
+}
+
+// Switch the current scaffold question to the two-input flow. Per question.
+function useScaffoldSteps() {
+  if (!round || round.ended || round.answered || !round.current.scaffold || round.stepped) return;
+  round.stepped = true;
+  round.step = 1;
+  round.step1Answer = "";
+  round.answerBuffer = "";
+  $("answer-display").innerHTML = "&nbsp;";
+  renderScaffold();
+}
+
 function nextQuestion() {
   if (!round || round.ended) return;
   clearFlash();
@@ -1456,6 +1484,7 @@ function nextQuestion() {
   round.answerBuffer = "";
   round.step = 1;
   round.step1Answer = "";
+  round.stepped = false;
   round.questionStartedAt = Date.now();
   setAnswerLock(false);
 
@@ -1463,15 +1492,14 @@ function nextQuestion() {
   var stepEl = $("question-step");
   var s = round.current.scaffold;
   if (s) {
-    $("question-text").textContent = round.current.question;
     hintEl.textContent = "Round " + s.b + " up to " + s.r;
     hintEl.style.display = "block";
-    stepEl.style.display = "block";
-    renderScaffoldStep();
+    renderScaffold();
   } else {
     $("question-text").textContent = round.current.question + " = ?";
     hintEl.style.display = "none";
     stepEl.style.display = "none";
+    $("steps-row").style.display = "none";
   }
   if (round.flashMs) {
     var shown = round.current;
@@ -1508,6 +1536,8 @@ function setAnswerLock(locked) {
   round.answered = locked;
   $("btn-submit").disabled = locked;
   $("btn-skip").disabled = locked;
+  $("btn-steps").disabled = locked;
+  if (locked) $("steps-row").style.display = "none";
 }
 
 function onKeypadPress(key) {
@@ -1532,8 +1562,8 @@ function submitAnswer() {
   if (round.answerBuffer === "") return; // empty submit does nothing
   var s = round.current.scaffold;
 
-  // Scaffold step 1: record and move on to step 2, no feedback yet.
-  if (s && round.step === 1) {
+  // Stepped scaffold, step 1: record and move on to step 2, no feedback yet.
+  if (s && round.stepped && round.step === 1) {
     round.step1Answer = round.answerBuffer;
     round.step = 2;
     round.answerBuffer = "";
@@ -1554,21 +1584,33 @@ function submitAnswer() {
     tags: round.current.tags
   };
   if (s) {
-    // Correct only if both steps are correct.
-    entry.correct = correct && answerMatches(round.step1Answer, s.step1);
-    entry.step1_answer = round.step1Answer;
+    entry.stepped = !!round.stepped;
     entry.step1_expected = s.step1;
-    entry.step2_answer = round.answerBuffer;
+    if (round.stepped) {
+      // Correct only if both steps are correct.
+      entry.correct = correct && answerMatches(round.step1Answer, s.step1);
+      entry.step1_answer = round.step1Answer;
+      entry.step2_answer = round.answerBuffer;
+    } else {
+      entry.step1_answer = "";
+      entry.step2_answer = "";
+    }
   }
   setAnswerLock(true);
   logQuestion(entry);
 
   var fb = $("feedback");
+  var delay = SETTINGS.feedbackDelayMs;
   if (entry.correct) {
     fb.textContent = "Correct · " + latency + "ms";
     fb.className = "feedback correct";
+  } else if (s) {
+    fb.textContent = "Wrong · you " + (round.stepped ? round.step1Answer + " → " : "") + entry.user_answer +
+      ", answer " + round.current.answer + " · " + scaffoldBreakdown(s, round.current.answer);
+    fb.className = "feedback incorrect";
+    delay = SETTINGS.subLab.scaffoldMissDelayMs;
   } else {
-    fb.textContent = "Wrong · answer " + (s ? s.step1 + " then " : "") + round.current.answer + " · " + latency + "ms";
+    fb.textContent = "Wrong · answer " + round.current.answer + " · " + latency + "ms";
     fb.className = "feedback incorrect";
   }
 
@@ -1576,7 +1618,12 @@ function submitAnswer() {
   setTimeout(function () {
     if (round !== thisRound || round.ended) return;
     nextQuestion();
-  }, SETTINGS.feedbackDelayMs);
+  }, delay);
+}
+
+// Worked breakdown for a scaffold miss: "a - r = X, + adj = final".
+function scaffoldBreakdown(s, answer) {
+  return s.a + " - " + s.r + " = " + s.step1 + ", + " + s.adj + " = " + answer;
 }
 
 function skipQuestion() {
@@ -1592,6 +1639,7 @@ function skipQuestion() {
     tags: round.current.tags
   };
   if (s) {
+    entry.stepped = !!round.stepped;
     entry.step1_answer = round.step1Answer;
     entry.step1_expected = s.step1;
     entry.step2_answer = "";
@@ -1621,6 +1669,7 @@ function logQuestion(partial) {
     entry.step1_answer = partial.step1_answer;
     entry.step1_expected = partial.step1_expected;
     entry.step2_answer = partial.step2_answer;
+    entry.stepped = partial.stepped;
   }
   round.log.push(entry);
 }
@@ -1709,8 +1758,9 @@ function renderSummary(roundState, record, gateBefore, gateAfter) {
     misses.forEach(function (m) {
       var row = document.createElement("div");
       row.className = "miss-row";
-      var you = m.step1_expected !== undefined ? m.step1_answer + " → " + m.user_answer : m.user_answer;
-      var right = m.step1_expected !== undefined ? m.step1_expected + " → " + m.correct_answer : m.correct_answer;
+      var steps = m.step1_expected !== undefined && m.stepped !== false;
+      var you = steps ? m.step1_answer + " → " + m.user_answer : m.user_answer;
+      var right = steps ? m.step1_expected + " → " + m.correct_answer : m.correct_answer;
       row.innerHTML = '<span>' + m.question + '</span><span>you: ' + you + ' · correct: ' + right + '</span>';
       missesEl.appendChild(row);
     });
@@ -1805,6 +1855,7 @@ function bindStaticEvents() {
   $("btn-build-plan").onclick = buildTodaysPlan;
   $("btn-submit").onclick = submitAnswer;
   $("btn-skip").onclick = skipQuestion;
+  $("btn-steps").onclick = useScaffoldSteps;
   $("btn-summary-home").onclick = function () {
     if (round && round.sublab) { renderSubLab(); showView("sublab"); return; }
     showView("home");
