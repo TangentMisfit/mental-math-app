@@ -568,6 +568,82 @@ test("questions.csv keeps len_mismatch as the 13th column (later columns are app
   assert.strictEqual(lines[2].split(",")[12], "false", "skipped rows are never len_mismatch");
 });
 
+console.log("error_type (diagnostic)");
+
+test("error_type cases", () => {
+  const et = (c, u) => app.errorType(false, false, String(u), c);
+  assert.strictEqual(et(1003, 993), "slip_tens");
+  assert.strictEqual(et(847, 947), "slip_hundreds");
+  assert.strictEqual(et(414, 416), "slip_ones");
+  assert.strictEqual(et(79, 779), "slip_hundreds");
+  assert.strictEqual(et(371, 369), "slip_ones");
+  assert.strictEqual(et(147, 177), "slip_tens");
+  // 192 vs 262 is |diff| 70, a multiple of 10 in 10-90, so the rule gives slip_tens.
+  assert.strictEqual(et(192, 262), "slip_tens");
+  assert.strictEqual(et(192, 265), "other");   // 73
+  assert.strictEqual(et(100, 1100), "other");  // 1000: beyond hundreds
+  assert.strictEqual(et(420, 560), "other");   // 140: not a multiple of 100
+  assert.strictEqual(et(5, ""), "other");
+});
+
+test("error_type is blank for correct and skipped answers", () => {
+  assert.strictEqual(app.errorType(true, false, "12", 12), "");
+  assert.strictEqual(app.errorType(false, true, "", 12), "");
+});
+
+test("questions.csv appends error_type as the last column, computed for old rows", () => {
+  const csv = app.questionsToCSV([
+    { question: "60 × 7 = ?", correct_answer: 420, user_answer: "560", correct: false, skipped: false, tags: [] },
+    { question: "52 + 61 = ?", correct_answer: 113, user_answer: "113", correct: true, skipped: false, tags: [] },
+    { question: "52 + 61 = ?", correct_answer: 113, user_answer: "", correct: false, skipped: true, tags: [] },
+    { question: "500 + 503 = ?", correct_answer: 1003, user_answer: "993", correct: false, skipped: false, tags: [] }
+  ]);
+  const lines = csv.split("\n");
+  const header = lines[0].split(",");
+  assert.strictEqual(header[header.length - 1], "error_type");
+  assert.strictEqual(header[header.length - 2], "stepped");
+  assert.ok(lines[1].endsWith(",other"), lines[1]);
+  assert.ok(lines[2].endsWith(","), lines[2]);
+  assert.ok(lines[3].endsWith(","), lines[3]);
+  assert.ok(lines[4].endsWith(",slip_tens"), lines[4]);
+  lines.forEach((l) => assert.strictEqual(l.split(",").length, header.length));
+});
+
+test("error_type is not a gate tag: a round of slips does not add tags", () => {
+  const rounds = [makeRound({ round_id: "rA" }), makeRound({ round_id: "rB" }), makeRound({ round_id: "rC" })];
+  const questions = ["rA", "rB", "rC"].map((rid) => ({
+    round_id: rid, mode: "add", difficulty: "intermediate", question: "52 + 61 = ?", correct_answer: 113,
+    user_answer: "123", correct: true, skipped: false, latency_ms: 1000, tags: []
+  }));
+  const gate = app.computeGate("add", "intermediate", rounds, questions);
+  assert.ok(gate.tagStats.every((t) => app.ERROR_TYPES.indexOf(t.tag) === -1));
+});
+
+test("topErrorType and breakdown text", () => {
+  const c = app.errorTypeCounts([
+    { correct: false, skipped: false, user_answer: "993", correct_answer: 1003 },
+    { correct: false, skipped: false, user_answer: "123", correct_answer: 113 },
+    { correct: false, skipped: false, user_answer: "947", correct_answer: 847 },
+    { correct: true, skipped: false, user_answer: "5", correct_answer: 5 }
+  ]);
+  assert.strictEqual(c.total, 3);
+  assert.strictEqual(app.topErrorType(c), "slip_tens");
+  assert.strictEqual(app.errorTypeBreakdownText(c), "slip_tens 2, slip_hundreds 1");
+});
+
+test("mode card breakdown covers window rounds plus drill rounds since the window started", () => {
+  const t0 = Date.now();
+  const iso = (ms) => new Date(t0 + ms).toISOString();
+  const win = [makeRound({ round_id: "w1", timestamp: iso(1000) }), makeRound({ round_id: "w2", timestamp: iso(2000) })];
+  const rounds = win.concat([
+    makeRound({ round_id: "d_old", drill: true, timestamp: iso(0) }),
+    makeRound({ round_id: "d_new", drill: true, timestamp: iso(1500) }),
+    makeRound({ round_id: "d_other", drill: true, difficulty: "advanced", timestamp: iso(1500) })
+  ]);
+  const ids = app.errorBreakdownRounds(rounds, "add", "intermediate", win).map((r) => r.round_id);
+  assert.deepStrictEqual(Array.from(ids), ["w1", "w2", "d_new"]);
+});
+
 console.log("CSV import mapping");
 
 test("mult-beginner / n/a maps to mul / beginner", () => {

@@ -59,11 +59,14 @@ Match the Python file unless noted. Inclusive ranges, operands drawn independent
 
 ## Data (localStorage)
 - Round log: `timestamp, mode, difficulty, round_seconds, asked, correct, accuracy, avg_time_ms, round_id, drill, legacy, stage, sublab`
-- Question log: `timestamp, round_id, mode, difficulty, question, correct_answer, user_answer, correct, skipped, latency_ms, tags, drill, len_mismatch, sublab, step1_answer, step1_expected, step2_answer, stepped`
+- Question log: `timestamp, round_id, mode, difficulty, question, correct_answer, user_answer, correct, skipped, latency_ms, tags, drill, len_mismatch, sublab, step1_answer, step1_expected, step2_answer, stepped`. Export adds a computed `error_type` column after `stepped`.
 - `len_mismatch`: true when the answer is wrong AND the user's answer has a different digit count than the correct answer (likely typo). Always false for skipped rows. Scoring unchanged: still a wrong answer. Rows logged before this column existed have it computed on export.
 - `sublab`: true for Sub Lab rounds/questions. Missing on older rows; exported as `false`.
 - `step1_answer`, `step1_expected`, `step2_answer`: Sub Lab scaffold questions only; blank otherwise. Single-input scaffold questions fill only `step1_expected`.
 - `stepped`: scaffold questions only; true when the Steps button was used for that question. Blank for non-scaffold rows and rows logged before this column existed.
+- `error_type` (diagnostic, all modes and labs): computed from each logged row on read, never stored, so it covers all history with no migration. diff = `user_answer - correct_answer`; `slip_ones` if 1 <= |diff| <= 9; `slip_tens` if |diff| is a multiple of 10 in 10-90; `slip_hundreds` if |diff| is a multiple of 100 in 100-900; `other` otherwise (including non-numeric answers); blank for correct or skipped rows. It is NOT a tag: never used by gates, weakest tags, speed focus, or drill weighting.
+  - Results screen (normal, drill, and lab rounds): with >= 2 misses, shows "Most misses: <type> (n of m)". Ties go to the first of slip_ones, slip_tens, slip_hundreds, other.
+  - Mode card: "Miss types" breakdown over the gate window rounds plus non-legacy drill rounds of the same mode+difficulty logged at or after the oldest window round (hidden when the window is empty).
 - New columns are always appended at the end of the CSV so older column positions never move.
 
 ## Tags (computed at generation)
@@ -148,7 +151,7 @@ Scaffold rounding rule: r = next hundred above b if (r - b) <= 30, else r = next
   - Set `legacy=true`: visible in history, never counts toward gates
 - **Export**: two separate buttons, Export rounds.csv and Export questions.csv, each triggering exactly one download (Android Chrome blocks back-to-back downloads).
   - rounds.csv columns, in order: `timestamp, mode, difficulty, round_seconds, asked, correct, accuracy, avg_time_ms, round_id, drill, legacy, stage, sublab`.
-  - questions.csv columns, in order: `timestamp, round_id, mode, difficulty, question, correct_answer, user_answer, correct, skipped, latency_ms, tags, drill, len_mismatch, sublab, step1_answer, step1_expected, step2_answer, stepped` (tags joined with `|`, as stored; `stepped` is the last column).
+  - questions.csv columns, in order: `timestamp, round_id, mode, difficulty, question, correct_answer, user_answer, correct, skipped, latency_ms, tags, drill, len_mismatch, sublab, step1_answer, step1_expected, step2_answer, stepped, error_type` (tags joined with `|`, as stored; `error_type` is the last column, computed on export).
   - Any new column is appended at the end.
 
 ## Known Python bugs (reference only; do not fix the .py)

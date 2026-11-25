@@ -379,12 +379,12 @@ test("questions.csv keeps the original columns in order, with stepped appended l
   ]);
   const lines = csv.split("\n");
   const header = lines[0].split(",");
-  assert.strictEqual(lines[0], "timestamp,round_id,mode,difficulty,question,correct_answer,user_answer,correct,skipped,latency_ms,tags,drill,len_mismatch,sublab,step1_answer,step1_expected,step2_answer,stepped");
-  assert.strictEqual(header[header.length - 1], "stepped");
-  assert.ok(lines[1].endsWith(",true,342,342,356,true"), lines[1]);
-  assert.ok(lines[2].endsWith(",true,,342,,false"), lines[2]);
-  assert.ok(lines[3].endsWith(",true,342,342,356,"), "older scaffold row: stepped blank");
-  assert.ok(lines[4].endsWith(",false,,,,"), "old non-scaffold rows: sublab=false, step and stepped columns blank");
+  assert.strictEqual(lines[0], "timestamp,round_id,mode,difficulty,question,correct_answer,user_answer,correct,skipped,latency_ms,tags,drill,len_mismatch,sublab,step1_answer,step1_expected,step2_answer,stepped,error_type");
+  assert.strictEqual(header[header.length - 2], "stepped");
+  assert.ok(lines[1].endsWith(",true,342,342,356,true,"), lines[1]);
+  assert.ok(lines[2].endsWith(",true,,342,,false,"), lines[2]);
+  assert.ok(lines[3].endsWith(",true,342,342,356,,"), "older scaffold row: stepped blank");
+  assert.ok(lines[4].endsWith(",false,,,,,"), "old non-scaffold rows: sublab=false, step and stepped columns blank");
   lines.forEach((l) => assert.strictEqual(l.split(",").length, header.length));
 });
 

@@ -242,6 +242,7 @@
       </div>
       <div class="card">
         <h2>Misses</h2>
+        <div class="muted" id="sum-error-type" style="display:none;"></div>
         <div id="sum-misses"><div class="muted">None</div></div>
       </div>
       <div class="card">
@@ -286,7 +287,7 @@
    SETTINGS — every tunable value lives here
    ============================================================ */
 var SETTINGS = {
-  appVersion: "v1.3.0",
+  appVersion: "v1.4.0",
   roundSeconds: 300,
   modes: ["add", "sub", "mul", "div"],
   comingSoonModes: ["pct", "scale", "mixed", "ratios"],
@@ -808,6 +809,67 @@ function lenMismatch(correct, userAnswer, correctAnswer) {
   return !correct && digitCount(userAnswer) !== digitCount(correctAnswer);
 }
 
+// Diagnostic error type for a wrong, non-skipped answer; "" otherwise.
+// diff = user_answer - correct_answer. Computed from logged data on read
+// (never stored), so it works on all history. Not a tag: never used by
+// gates, weakest tags, or drill weighting.
+var ERROR_TYPES = ["slip_ones", "slip_tens", "slip_hundreds", "other"];
+function errorType(correct, skipped, userAnswer, correctAnswer) {
+  if (correct || skipped) return "";
+  var u = parseFloat(userAnswer), c = Number(correctAnswer);
+  if (isNaN(u) || isNaN(c)) return "other";
+  var d = Math.round(Math.abs(u - c) * 1e6) / 1e6;
+  if (d >= 1 && d <= 9 && d === Math.floor(d)) return "slip_ones";
+  if (d >= 10 && d <= 90 && d % 10 === 0) return "slip_tens";
+  if (d >= 100 && d <= 900 && d % 100 === 0) return "slip_hundreds";
+  return "other";
+}
+function errorTypeForRow(q) {
+  return errorType(q.correct, q.skipped, q.user_answer, q.correct_answer);
+}
+
+// { slip_ones: n, ..., total } over wrong, non-skipped rows.
+function errorTypeCounts(rows) {
+  var counts = { slip_ones: 0, slip_tens: 0, slip_hundreds: 0, other: 0, total: 0 };
+  for (var i = 0; i < rows.length; i++) {
+    var t = errorTypeForRow(rows[i]);
+    if (!t) continue;
+    counts[t]++;
+    counts.total++;
+  }
+  return counts;
+}
+
+// Most common error type, or null. Ties go to the earlier ERROR_TYPES entry.
+function topErrorType(counts) {
+  var best = null;
+  for (var i = 0; i < ERROR_TYPES.length; i++) {
+    var t = ERROR_TYPES[i];
+    if (counts[t] > 0 && (!best || counts[t] > counts[best])) best = t;
+  }
+  return best;
+}
+
+function errorTypeBreakdownText(counts) {
+  if (!counts.total) return "no misses";
+  return ERROR_TYPES.filter(function (t) { return counts[t] > 0; })
+    .map(function (t) { return t + " " + counts[t]; }).join(", ");
+}
+
+// Rows for the mode card's error-type breakdown: the gate window rounds plus
+// non-legacy drill rounds of the same mode+difficulty logged at or after the
+// oldest window round (all such drill rounds while the window is empty).
+function errorBreakdownRounds(rounds, mode, difficulty, windowRounds) {
+  var since = windowRounds.length
+    ? Math.min.apply(null, windowRounds.map(function (r) { return new Date(r.timestamp).getTime(); }))
+    : -Infinity;
+  var drills = rounds.filter(function (r) {
+    return r.mode === mode && r.difficulty === difficulty && r.drill && !r.legacy &&
+      new Date(r.timestamp).getTime() >= since;
+  });
+  return windowRounds.concat(drills);
+}
+
 /* ============================================================
    TAG STATS / GATES
    ============================================================ */
@@ -1002,8 +1064,9 @@ function questionsToCSV(questions) {
   // New columns are appended at the end to stay backward compatible.
   // step1_* / step2_answer / stepped are filled only for Sub Lab scaffold questions.
   // Rows logged before "stepped" existed export it blank.
+  // error_type is computed from each row on export (blank for correct/skipped).
   var header = ["timestamp", "round_id", "mode", "difficulty", "question", "correct_answer", "user_answer", "correct", "skipped", "latency_ms", "tags", "drill", "len_mismatch",
-    "sublab", "step1_answer", "step1_expected", "step2_answer", "stepped"];
+    "sublab", "step1_answer", "step1_expected", "step2_answer", "stepped", "error_type"];
   var lines = [header.join(",")];
   for (var i = 0; i < questions.length; i++) {
     var q = questions[i];
@@ -1012,6 +1075,7 @@ function questionsToCSV(questions) {
       if (k === "tags") v = (v || []).join("|");
       if (k === "len_mismatch" && v == null) v = !q.skipped && lenMismatch(q.correct, q.user_answer, q.correct_answer);
       if (k === "sublab") v = !!v;
+      if (k === "error_type") v = errorTypeForRow(q);
       return csvEscape(v);
     }).join(","));
   }
@@ -1203,6 +1267,10 @@ function renderDashboard() {
     var level = currentLevel(mode, unlocked);
     var gate = computeGate(mode, level, rounds, questions);
     var weak = weakestTags(gate.tagStats, SETTINGS.weakSpot.weakTagCount);
+    var etRounds = errorBreakdownRounds(rounds, mode, level, gate.window);
+    var etIds = {};
+    etRounds.forEach(function (r) { etIds[r.round_id] = true; });
+    var etCounts = errorTypeCounts(questions.filter(function (q) { return etIds[q.round_id]; }));
 
     var lastN = gate.window.length;
     var pooledAcc = gate.pooledAccuracy;
@@ -1229,6 +1297,7 @@ function renderDashboard() {
       (gate.reason ? '<div class="muted">' + gate.reason + '</div>' : '') +
       '<div class="tags-line">Weakest: ' + weakHtml + '</div>' +
       (gate.speedFocus.length ? '<div class="tags-line">Speed focus: ' + speedFocusHtml(gate.speedFocus) + '</div>' : '') +
+      (etRounds.length ? '<div class="tags-line">Miss types (window + drills): ' + errorTypeBreakdownText(etCounts) + '</div>' : '') +
       '<div class="btn-row">' +
         '<button class="action secondary" data-play="' + mode + '|beginner">Practice beginner</button>' +
         '<button class="action" data-play="' + mode + '|' + level + '">Practice ' + level + '</button>' +
@@ -1750,6 +1819,16 @@ function renderSummary(roundState, record, gateBefore, gateAfter) {
   }
 
   var misses = roundState.log.filter(function (q) { return !q.skipped && !q.correct; });
+  var etEl = $("sum-error-type");
+  var etCounts = errorTypeCounts(misses);
+  var top = topErrorType(etCounts);
+  if (misses.length >= 2 && top) {
+    etEl.textContent = "Most misses: " + top + " (" + etCounts[top] + " of " + misses.length + ")";
+    etEl.style.display = "block";
+  } else {
+    etEl.textContent = "";
+    etEl.style.display = "none";
+  }
   var missesEl = $("sum-misses");
   missesEl.innerHTML = "";
   if (!misses.length) {
