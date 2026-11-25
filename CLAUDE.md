@@ -114,7 +114,7 @@ Weakest tags: rank by miss rate, tiebreak by avg latency, minimum 3 attempts.
   2. **Calibrating**: modes in Calibrating (n/3).
   3. **Everything else**, sorted by pooled window accuracy, lowest first. Drill-status modes get a weak-spot (drill) round; others a normal round labeled with their gate status.
   - **Stall cap**: a mode+difficulty is stalled when it has >= 10 practice rounds, the mean accuracy of its last 5 practice rounds is not at least 2.0 points above the mean of the 5 before those, and its gate is not Advance. A stalled mode gets at most 1 round, labeled "Maintenance (stalled)", always a normal (non-drill) round, keeping its place in the order above. Its mode card shows "Stalled".
-  - **Optional lab items** after the rounds: for each planned mode with a lab (`SETTINGS.plan.labs`: sub -> Sub Lab) whose pooled window accuracy is below 90%, an "Optional: <lab>" item that opens the lab screen. Not counted toward the 4.
+  - **Optional lab items** after the rounds: for each planned mode with a lab (`SETTINGS.plan.labs`: sub -> Sub Lab, mul -> Mul Lab) whose pooled window accuracy is below 90%, an "Optional: <lab>" item that opens the lab screen. Not counted toward the 4.
   - Speed-focus tags are listed on a separate "Speed focus" line, not as plan items.
 - **Weak-spot round** (modes in Drill), logged `drill=true`:
   - 20% of questions: plain random from the normal generator.
@@ -129,9 +129,9 @@ Weakest tags: rank by miss rate, tiebreak by avg latency, minimum 3 attempts.
 Practice-only subtraction sub-skill drills, opened from the Sub Lab button on the Subtraction card. Purpose: reduce working-memory load in 3-digit subtraction by drilling rounding the subtrahend and adjusting.
 
 - Logged to the normal round and question logs with mode `sublab`, difficulty = drill id, `sublab=true`, `drill=false`. Full per-question data, so it appears in CSV export.
-- **Excluded from every gate window and from Today's plan rules** (never a plan round, never counted as a practice round), like legacy rows. The plan may only suggest opening the lab as an optional item: `getQualifyingRounds` rejects `sublab` rows (and mode `sublab` is not in `SETTINGS.modes`, so no gate, unlock, dashboard card, or plan entry is ever computed for it). Drill weights also skip `sublab` questions.
+- **Excluded from every gate window and from Today's plan rules** (never a plan round, never counted as a practice round), like legacy rows. The plan may only suggest opening the lab as an optional item: `getQualifyingRounds` rejects `sublab` rows and any lab mode (`isLabMode`), and mode `sublab` is not in `SETTINGS.modes`, so no gate, unlock, dashboard card, or plan round is ever computed for it. `practiceRounds` (plan Start/stall counts) and drill weights also skip `sublab` and lab-mode rows.
 - Same 300 s round, timer, skip, and empty-submit behavior as normal rounds. No repeated question text within a round.
-- Sub Lab screen: one card per drill with last round's accuracy and avg latency, plus the flash duration setting.
+- Sub Lab screen (the shared lab screen, `view-lab`): one card per drill with last round's accuracy and avg latency, plus the flash duration setting.
 - Results: asked, correct, accuracy, avg latency vs the display-only speed reference, worst tag by miss rate (min 3 attempts), misses, 3 slowest. No gate status.
 - Speed references are display only, never used by a gate.
 
@@ -147,6 +147,25 @@ Scaffold rounding rule: r = next hundred above b if (r - b) <= 30, else r = next
 - Optional Steps: a small Steps button under the input switches that question only to the two-input flow: `a - b` at top, input 1 `a - r = ?`, input 2 `+ adj = ?` (adj shown). Correct only if both inputs are correct. Latency = display to second submit. Logged `stepped=true`, `user_answer` = `step2_answer` = second input, `step1_answer` = first input, `step1_expected` = a - r. The next question returns to single input.
 - Miss feedback: the feedback area shows the user's answer vs the correct answer plus the worked breakdown `a - r = X, + adj = final` with real numbers. The feedback pause is 2500 ms for scaffold misses (`SETTINGS.subLab.scaffoldMissDelayMs`); all other feedback keeps the normal pause. No extra input.
 - `question` = `a - b = ?`. A skip records `stepped` and whatever step 1 had.
+
+## Labs (shared mechanism)
+- `LABS` registry in `index.html` maps each lab mode to its v1 mode, `SETTINGS` config, and intro text. `isLabMode(mode)` is true for `sublab` and `mullab`.
+- Lab modes are never in `SETTINGS.modes`. Lab rounds get no gate before/after, show the lab results block (speed refs, worst tag), and return to the lab screen.
+- The logged `sublab` field keeps its meaning (true only for Sub Lab). Mul Lab rows log `sublab=false` and are identified by mode `mullab`. No new CSV columns.
+- Speed reference keys: `all`, a tag, or `!tag` (answers without that tag). Display only.
+
+## Mul Lab (v1.x)
+Practice-only multiplication facts drill, opened from the Mul Lab button on the Multiplication card (and offered as an optional Today's plan item when mul's window accuracy is below 90%). Purpose: fix x6-x9 and tens-fact misses (e.g. 60 × 7 answered 560).
+
+- Logged to the normal round and question logs with mode `mullab`, difficulty `facts`, `sublab=false`, `drill=false`.
+- **Excluded from every gate window and from Today's plan rules**, like Sub Lab: `getQualifyingRounds` and `practiceRounds` reject lab modes via `isLabMode`; `drillTagWeights` skips lab rows; `mullab` is not in `SETTINGS.modes`, so `computeGate`, `refreshUnlocks`, `renderDashboard`, and `buildPlan` never evaluate it; `startRound`/`endRound` compute no gate for lab rounds.
+- Same 300 s round, timer, skip, empty-submit, and answered-lock behavior as normal rounds. Unique question text within a round until the ~80 distinct facts run out; after that the existing `generateUnique` fallback allows a repeat.
+- Generator (`SETTINGS.mulLab.facts`), 50/50:
+  - Single-digit fact: `a × b`, a 6-9, b 2-9, factors shown in random order.
+  - Tens fact: `(a*10) × b`, a 2-9, b 6-9 (e.g. `60 × 7`, `40 × 8`).
+- Tags: `fact_x6`..`fact_x9` by the 6-9 factor (the larger when both are 6-9; for tens facts, b), plus `tensfact` for tens facts.
+- Speed references (display only, never a gate): 2000 ms single-digit facts, 3000 ms tens facts.
+- Results: asked, correct, accuracy, avg latency vs the references, worst tag by miss rate (min 3 attempts), most common error type, misses, 3 slowest. No gate status.
 
 ## Import / export
 - **Import CSV** (legacy `progress.csv`):

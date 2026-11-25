@@ -132,7 +132,7 @@ test("plan never exceeds 4 rounds; labs are only optional extras", () => {
   const plan = loadApp().buildPlan(rs, []);
   assert.strictEqual(plan.items.length, 4);
   assert.strictEqual(new Set(Array.from(plan.items, (i) => i.mode)).size, 4);
-  assert.deepStrictEqual(Array.from(plan.labs, (l) => l.lab), ["sublab"]);
+  assert.deepStrictEqual(Array.from(plan.labs, (l) => l.lab).sort(), ["mullab", "sublab"]);
 });
 
 test("lab item only when the mode's window accuracy is below 90%", () => {
