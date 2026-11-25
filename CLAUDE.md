@@ -108,8 +108,14 @@ Speed targets (ms):
 Weakest tags: rank by miss rate, tiebreak by avg latency, minimum 3 attempts.
 
 ## Features
-- **Home dashboard**: one card per mode showing level, gate status (with Drill/Hold reason), pooled window accuracy, avg time vs goal and ceiling, top 2 weakest tags, speed-focus tags.
-- **Today's plan**: queues up to 3 rounds. Order: Drill, then Calibrating, then Hold. Speed-focus tags are listed on a separate "Speed focus" line, not as plan items.
+- **Home dashboard**: one card per mode showing level, gate status (with Drill/Hold reason), a "Stalled" badge when the stall rule below holds, pooled window accuracy, avg time vs goal and ceiling, top 2 weakest tags, speed-focus tags.
+- **Today's plan** (`buildPlan`; tunables in `SETTINGS.plan`): max 4 rounds, at most 1 per v1 mode, each mode at its current difficulty. "Practice rounds" = non-legacy, non-lab rounds (drill + non-drill) at that mode+difficulty. Priority order:
+  1. **Start**: modes whose current difficulty has 0 practice rounds. Label "Start".
+  2. **Calibrating**: modes in Calibrating (n/3).
+  3. **Everything else**, sorted by pooled window accuracy, lowest first. Drill-status modes get a weak-spot (drill) round; others a normal round labeled with their gate status.
+  - **Stall cap**: a mode+difficulty is stalled when it has >= 10 practice rounds, the mean accuracy of its last 5 practice rounds is not at least 2.0 points above the mean of the 5 before those, and its gate is not Advance. A stalled mode gets at most 1 round, labeled "Maintenance (stalled)", always a normal (non-drill) round, keeping its place in the order above. Its mode card shows "Stalled".
+  - **Optional lab items** after the rounds: for each planned mode with a lab (`SETTINGS.plan.labs`: sub -> Sub Lab) whose pooled window accuracy is below 90%, an "Optional: <lab>" item that opens the lab screen. Not counted toward the 4.
+  - Speed-focus tags are listed on a separate "Speed focus" line, not as plan items.
 - **Weak-spot round** (modes in Drill), logged `drill=true`:
   - 20% of questions: plain random from the normal generator.
   - 80%: pick a target tag by weighted sampling from a priority pool, then rejection-sample the normal generator until the question has that tag (cap 200 tries, then any unseen problem).
@@ -123,7 +129,7 @@ Weakest tags: rank by miss rate, tiebreak by avg latency, minimum 3 attempts.
 Practice-only subtraction sub-skill drills, opened from the Sub Lab button on the Subtraction card. Purpose: reduce working-memory load in 3-digit subtraction by drilling rounding the subtrahend and adjusting.
 
 - Logged to the normal round and question logs with mode `sublab`, difficulty = drill id, `sublab=true`, `drill=false`. Full per-question data, so it appears in CSV export.
-- **Excluded from every gate window and Today's plan**, like legacy rows: `getQualifyingRounds` rejects `sublab` rows (and mode `sublab` is not in `SETTINGS.modes`, so no gate, unlock, dashboard card, or plan entry is ever computed for it). Drill weights also skip `sublab` questions.
+- **Excluded from every gate window and from Today's plan rules** (never a plan round, never counted as a practice round), like legacy rows. The plan may only suggest opening the lab as an optional item: `getQualifyingRounds` rejects `sublab` rows (and mode `sublab` is not in `SETTINGS.modes`, so no gate, unlock, dashboard card, or plan entry is ever computed for it). Drill weights also skip `sublab` questions.
 - Same 300 s round, timer, skip, and empty-submit behavior as normal rounds. No repeated question text within a round.
 - Sub Lab screen: one card per drill with last round's accuracy and avg latency, plus the flash duration setting.
 - Results: asked, correct, accuracy, avg latency vs the display-only speed reference, worst tag by miss rate (min 3 attempts), misses, 3 slowest. No gate status.

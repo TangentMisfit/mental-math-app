@@ -76,6 +76,7 @@
   .badge.locked { background: var(--surface-2); color: var(--lock); }
   .badge.complete { background: var(--surface-2); color: var(--text-dim); }
   .badge.soon { background: var(--surface-2); color: var(--text-dim); }
+  .badge.stalled { background: rgba(217,119,6,0.15); color: var(--warn); margin-left: 6px; }
 
   .stats-line { display: flex; gap: 14px; margin: 8px 0; flex-wrap: wrap; }
   .stat { font-size: 13px; }
@@ -287,7 +288,7 @@
    SETTINGS — every tunable value lives here
    ============================================================ */
 var SETTINGS = {
-  appVersion: "v1.4.0",
+  appVersion: "v1.5.0",
   roundSeconds: 300,
   modes: ["add", "sub", "mul", "div"],
   comingSoonModes: ["pct", "scale", "mixed", "ratios"],
@@ -330,6 +331,16 @@ var SETTINGS = {
 
   weakSpot: {
     weakTagCount: 2 // weakest tags shown on the dashboard
+  },
+
+  // Today's plan. See buildPlan for the priority order.
+  plan: {
+    maxRounds: 4,
+    stallMinRounds: 10,      // non-legacy rounds (drill + non-drill) at the current difficulty
+    stallCompareRounds: 5,   // mean accuracy of the last 5 vs the 5 before that
+    stallMinGainPts: 2.0,    // stalled unless the last 5 beat the previous 5 by at least this
+    labAccuracyPct: 90,      // suggest a mode's lab when its window accuracy is below this
+    labs: { sub: "sublab" }  // v1 mode -> lab mode offered as an optional plan item
   },
 
   // Drill (weak-spot) rounds: each question's target tag is drawn by weight.
@@ -1280,6 +1291,7 @@ function renderDashboard() {
     card.className = "card";
 
     var badgeClass = gate.status.toLowerCase();
+    var stalled = isStalled(rounds, mode, level, gate);
     var weakHtml = weak.length
       ? weak.map(function (w) { return w.tag + " (" + fmtPct(w.missRate * 100) + " miss)"; }).join(", ")
       : "not enough data yet";
@@ -1288,7 +1300,8 @@ function renderDashboard() {
 
     card.innerHTML =
       '<div class="row"><h2>' + SETTINGS.modeLabels[mode] + '</h2>' +
-      '<span class="badge ' + badgeClass + '">' + gate.label + '</span></div>' +
+      '<span><span class="badge ' + badgeClass + '">' + gate.label + '</span>' +
+      (stalled ? '<span class="badge stalled">Stalled</span>' : '') + '</span></div>' +
       '<div class="muted">Level: ' + level + '</div>' +
       '<div class="stats-line">' +
         '<div class="stat">Pooled acc (last ' + lastN + '/3)<b>' + (pooledAcc == null ? "-" : fmtPct(pooledAcc)) + '</b></div>' +
@@ -1404,40 +1417,110 @@ function renderSubLab() {
   });
 }
 
-function buildTodaysPlan() {
-  var rounds = getRounds();
-  var questions = getQuestions();
+// Non-legacy, non-lab rounds (drill + non-drill) at mode+difficulty, oldest first.
+function practiceRounds(rounds, mode, difficulty) {
+  return rounds
+    .filter(function (r) { return r.mode === mode && r.difficulty === difficulty && !r.legacy && !r.sublab; })
+    .sort(function (a, b) { return new Date(a.timestamp) - new Date(b.timestamp); });
+}
+
+function meanAccuracy(rs) {
+  return rs.reduce(function (s, r) { return s + (Number(r.accuracy) || 0); }, 0) / rs.length;
+}
+
+// Stalled: >= stallMinRounds practice rounds at this difficulty, the mean
+// accuracy of the last 5 is not at least stallMinGainPts above the mean of the
+// 5 before that, and the gate is not Advance.
+function isStalled(rounds, mode, difficulty, gate) {
+  var c = SETTINGS.plan;
+  if (gate && gate.status === "Advance") return false;
+  var rs = practiceRounds(rounds, mode, difficulty);
+  if (rs.length < c.stallMinRounds) return false;
+  var n = c.stallCompareRounds;
+  var last = rs.slice(-n), prev = rs.slice(-2 * n, -n);
+  return meanAccuracy(last) - meanAccuracy(prev) < c.stallMinGainPts;
+}
+
+// Today's plan, max SETTINGS.plan.maxRounds rounds, one per mode:
+//   a) modes whose current difficulty has 0 practice rounds ("Start")
+//   b) modes in Calibrating
+//   c) the rest by window (pooled) accuracy, lowest first; Drill -> drill round
+// A stalled mode gets at most 1 round, labeled "Maintenance (stalled)", as a
+// normal (non-drill) round. Labs are appended as optional items for planned
+// modes whose window accuracy is below labAccuracyPct.
+function buildPlan(rounds, questions) {
   var unlocked = refreshUnlocks(rounds, questions);
-  var priority = { Drill: 0, Calibrating: 1, Hold: 2, Advance: 3 };
   var entries = SETTINGS.modes.map(function (mode) {
     var level = currentLevel(mode, unlocked);
     var gate = computeGate(mode, level, rounds, questions);
-    return { mode: mode, level: level, status: gate.status, speedFocus: gate.speedFocus };
+    return {
+      mode: mode, level: level, gate: gate,
+      count: practiceRounds(rounds, mode, level).length,
+      stalled: isStalled(rounds, mode, level, gate)
+    };
   });
-  entries.sort(function (a, b) { return priority[a.status] - priority[b.status]; });
-  var plan = entries.slice(0, 3);
+  var start = entries.filter(function (e) { return e.count === 0; });
+  var calib = entries.filter(function (e) { return e.count > 0 && e.gate.status === "Calibrating"; });
+  var rest = entries.filter(function (e) { return e.count > 0 && e.gate.status !== "Calibrating"; })
+    .sort(function (a, b) { return a.gate.pooledAccuracy - b.gate.pooledAccuracy; });
+
+  var items = [];
+  var planned = {};
+  function add(e, group) {
+    if (planned[e.mode] || items.length >= SETTINGS.plan.maxRounds) return; // stall cap: 1 round per mode
+    planned[e.mode] = true;
+    var item = { mode: e.mode, level: e.level, group: group, status: e.gate.status, stalled: e.stalled,
+      accuracy: e.gate.pooledAccuracy, drill: false, label: e.gate.label };
+    if (group === "start") item.label = "Start";
+    if (group === "rest" && e.gate.status === "Drill") { item.drill = true; item.label = "Drill"; }
+    if (e.stalled) { item.drill = false; item.label = "Maintenance (stalled)"; }
+    items.push(item);
+  }
+  start.forEach(function (e) { add(e, "start"); });
+  calib.forEach(function (e) { add(e, "calibrating"); });
+  rest.forEach(function (e) { add(e, "rest"); });
+
+  var labs = [];
+  items.forEach(function (it) {
+    var lab = SETTINGS.plan.labs[it.mode];
+    if (lab && it.accuracy != null && it.accuracy < SETTINGS.plan.labAccuracyPct) labs.push({ lab: lab, forMode: it.mode });
+  });
+
+  var focus = entries.filter(function (e) { return e.gate.speedFocus.length; })
+    .map(function (e) { return { mode: e.mode, level: e.level, speedFocus: e.gate.speedFocus }; });
+  return { items: items, labs: labs, speedFocus: focus };
+}
+
+function buildTodaysPlan() {
+  var plan = buildPlan(getRounds(), getQuestions());
+  var btn = 'class="action" style="flex:none;padding:6px 10px;"';
 
   var listEl = $("plan-list");
   listEl.innerHTML = "";
-  for (var i = 0; i < plan.length; i++) {
-    var p = plan[i];
+  plan.items.forEach(function (p) {
     var item = document.createElement("div");
     item.className = "plan-item";
-    item.innerHTML = '<span>' + SETTINGS.modeLabels[p.mode] + ' &middot; ' + p.level + ' (' + p.status + ')</span>' +
-      '<button class="action" style="flex:none;padding:6px 10px;" data-play="' + p.mode + '|' + p.level + '">Go</button>';
+    item.innerHTML = '<span>' + SETTINGS.modeLabels[p.mode] + ' &middot; ' + p.level + ' (' + p.label + ')</span>' +
+      '<button ' + btn + (p.drill ? ' data-drill="' : ' data-play="') + p.mode + '|' + p.level + '">Go</button>';
     listEl.appendChild(item);
-  }
+  });
+  plan.labs.forEach(function (l) {
+    var item = document.createElement("div");
+    item.className = "plan-item";
+    item.innerHTML = '<span>Optional: ' + SETTINGS.modeLabels[l.lab] + '</span>' +
+      '<button ' + btn + ' data-open-sublab="1">Open</button>';
+    listEl.appendChild(item);
+  });
   // Speed focus: non-blocking, listed separately from drill items.
-  var focus = entries.filter(function (e) { return e.speedFocus.length; });
-  if (focus.length) {
+  if (plan.speedFocus.length) {
     var line = document.createElement("div");
     line.className = "tags-line";
-    line.innerHTML = "Speed focus: " + focus.map(function (e) {
+    line.innerHTML = "Speed focus: " + plan.speedFocus.map(function (e) {
       return SETTINGS.modeLabels[e.mode] + " &middot; " + e.level + " (" + speedFocusHtml(e.speedFocus) + ")";
     }).join("; ");
     listEl.appendChild(line);
   }
-  $("plan-card").style.display = plan.length ? "block" : "none";
+  $("plan-card").style.display = plan.items.length ? "block" : "none";
   bindDashboardActions();
 }
 
