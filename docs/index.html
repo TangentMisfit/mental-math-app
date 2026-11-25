@@ -76,6 +76,10 @@
   .badge.locked { background: var(--surface-2); color: var(--lock); }
   .badge.complete { background: var(--surface-2); color: var(--text-dim); }
   .badge.soon { background: var(--surface-2); color: var(--text-dim); }
+  .update-banner {
+    display: none; width: 100%; margin-bottom: 12px; padding: 10px 12px; border: none; border-radius: 10px;
+    background: var(--accent); color: var(--accent-text); font-size: 14px; font-weight: 600; text-align: center;
+  }
   .badge.stalled { background: rgba(217,119,6,0.15); color: var(--warn); margin-left: 6px; }
 
   .stats-line { display: flex; gap: 14px; margin: 8px 0; flex-wrap: wrap; }
@@ -166,6 +170,7 @@
 
   <main>
     <section id="view-home" class="view active">
+      <button class="update-banner" id="update-banner"></button>
       <div id="plan-card" class="card" style="display:none;">
         <h2>Today's plan</h2>
         <div id="plan-list"></div>
@@ -288,7 +293,7 @@
    SETTINGS — every tunable value lives here
    ============================================================ */
 var SETTINGS = {
-  appVersion: "v1.6.0",
+  appVersion: "v1.7.0",
   roundSeconds: 300,
   modes: ["add", "sub", "mul", "div"],
   comingSoonModes: ["pct", "scale", "mixed", "ratios"],
@@ -1923,6 +1928,7 @@ function endRound() {
 
   addQuestions(round.log);
   addRound(roundRecord);
+  maybeShowUpdateBanner(); // an update found mid-round was queued until now
   refreshUnlocks(getRounds(), getQuestions());
 
   var gateAfter = round.lab ? null : computeGate(round.mode, round.difficulty, getRounds(), getQuestions());
@@ -2115,9 +2121,79 @@ function init() {
   renderDashboard();
   showView("home");
 
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js").catch(function () {});
+  setupServiceWorker();
+}
+
+/* ============================================================
+   UPDATES
+   ============================================================ */
+// A new service worker installs and waits. The home screen shows a banner;
+// tapping it tells the waiting worker to take over, and the page reloads once
+// on controllerchange. Never shown or applied during an active round.
+var update = { worker: null, version: null, requested: false, reloaded: false };
+
+function roundActive() {
+  return !!round && !round.ended;
+}
+
+function offerUpdate(worker) {
+  if (!worker) return;
+  update.worker = worker;
+  maybeShowUpdateBanner();
+  // Version of the new build, read from its index.html when reachable.
+  if (typeof fetch === "function") {
+    fetch("./index.html", { cache: "no-store" })
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        var m = /appVersion:\s*"([^"]+)"/.exec(html);
+        if (m && m[1] !== SETTINGS.appVersion) { update.version = m[1]; maybeShowUpdateBanner(); }
+      })
+      .catch(function () {});
   }
+}
+
+function maybeShowUpdateBanner() {
+  var el = $("update-banner");
+  if (!el || !update.worker || roundActive()) return;
+  el.textContent = update.version
+    ? "Update ready (" + update.version + "). Tap to reload."
+    : "Update ready. Tap to reload.";
+  el.style.display = "block";
+}
+
+function applyUpdate() {
+  if (!update.worker || roundActive()) return;
+  update.requested = true;
+  update.worker.postMessage({ type: "SKIP_WAITING" });
+}
+
+function onControllerChange() {
+  // Reload only for an update the user asked for, and only once.
+  if (!update.requested || update.reloaded) return;
+  update.reloaded = true;
+  window.location.reload();
+}
+
+function setupServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  var sw = navigator.serviceWorker;
+  $("update-banner").onclick = applyUpdate;
+  sw.addEventListener("controllerchange", onControllerChange);
+  sw.register("sw.js", { updateViaCache: "none" }).then(function (reg) {
+    if (reg.waiting) offerUpdate(reg.waiting);
+    reg.addEventListener("updatefound", function () {
+      var w = reg.installing;
+      if (!w) return;
+      w.addEventListener("statechange", function () {
+        if (w.state === "installed" && sw.controller) offerUpdate(w);
+      });
+    });
+    var check = function () { reg.update().catch(function () {}); };
+    check();
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") check();
+    });
+  }).catch(function () {});
 }
 
 if (typeof document !== "undefined" && document.addEventListener) {

@@ -26,6 +26,20 @@ Mental math practice app: the original Python terminal game plus a mobile PWA po
 - Tests: `node tests/<file>.js` for each file in `tests/`
 - Deploy: `git push origin main` (Pages serves `/docs` on `main`)
 
+## Updates
+- Every change to `docs/`: bump `CACHE_VERSION` in `sw.js`. User-visible changes also bump `SETTINGS.appVersion`. Changing `sw.js` bytes is what makes the browser install a new worker.
+- `sw.js`:
+  - Install precaches the app shell and does NOT call `skipWaiting()`; the new worker waits.
+  - A `{type: "SKIP_WAITING"}` message makes the waiting worker call `skipWaiting()`.
+  - Activate deletes every cache except the current `mental-math-<CACHE_VERSION>`, then `clients.claim()`.
+  - Fetch: navigation requests and `index.html` are network-first with cache fallback (online launches always get the latest HTML); icons, manifest, and other files are cache-first.
+- Page (`setupServiceWorker` in `index.html`):
+  - Registers `sw.js` with `{updateViaCache: "none"}` and calls `registration.update()` on load and whenever the page becomes visible.
+  - When `registration.waiting` exists, or a new worker reaches `installed` while a controller exists, the home screen shows a banner: "Update ready (vX.Y.Z). Tap to reload." The version is read from the new `index.html` (`appVersion`); if it can't be read, "Update ready. Tap to reload."
+  - Never shown or applied during an active round: an update found mid-round is queued and the banner appears when the round ends.
+  - Tap posts `SKIP_WAITING` to the waiting worker. On `controllerchange` the page reloads once, and only after a tap (so a first install's `clients.claim()` never reloads).
+- Stored data and `mma_` localStorage keys are untouched by updates.
+
 ## Scope
 - v1 modes: add, sub, mul, div.
 - pct, scale, mixed, ratios: show "coming soon." No generators.
